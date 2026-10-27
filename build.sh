@@ -1,16 +1,16 @@
 #!/bin/bash
-# Compila o app e monta o "Offload.app" em ./build
+# Compila o app e monta o "Acervo.app" em ./build
 set -euo pipefail
 cd "$(dirname "$0")"
 VERSION="2.0"
-APP="build/Offload.app"
+APP="build/Acervo.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" build/icon.iconset
 # Universal: roda em Mac com Apple Silicon e com Intel
 for arch in arm64 x86_64; do
   swiftc -O -swift-version 5 -enable-bare-slash-regex -target $arch-apple-macos14.0 -parse-as-library \
-    Sources/*.swift -o "build/Offload-$arch"
+    Sources/*.swift -o "build/Acervo-$arch"
 done
-lipo -create "build/Offload-arm64" "build/Offload-x86_64" -output "$APP/Contents/MacOS/Offload"
+lipo -create "build/Acervo-arm64" "build/Acervo-x86_64" -output "$APP/Contents/MacOS/Acervo"
 swiftc -swift-version 5 MakeIcon.swift -o build/makeicon && build/makeicon build/icon.png
 for s in 16 32 128 256 512; do
   sips -z $s $s build/icon.png --out build/icon.iconset/icon_${s}x${s}.png >/dev/null
@@ -21,10 +21,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>Offload</string>
-  <key>CFBundleDisplayName</key><string>Offload</string>
-  <key>CFBundleIdentifier</key><string>com.vertice.offload</string>
-  <key>CFBundleExecutable</key><string>Offload</string>
+  <key>CFBundleName</key><string>Acervo</string>
+  <key>CFBundleDisplayName</key><string>Acervo</string>
+  <key>CFBundleIdentifier</key><string>com.vertice.acervo</string>
+  <key>CFBundleExecutable</key><string>Acervo</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>

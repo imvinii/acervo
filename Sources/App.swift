@@ -1,4 +1,4 @@
-// Offload: backup dos cartões depois de uma gravação.
+// Acervo: backup dos cartões depois de uma gravação.
 // Substitui os atalhos "Criar projeto" e "Importar SD".
 
 import SwiftUI
@@ -6,11 +6,11 @@ import AppKit
 import UserNotifications
 
 enum AppInfo {
-    static let name = "Offload"
+    static let name = "Acervo"
 }
 
 @main
-struct OffloadApp: App {
+struct AcervoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = Model()
     var body: some Scene {

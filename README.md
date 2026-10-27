@@ -1,4 +1,4 @@
-# Offload
+# Acervo
 
 **Português** · [English](#english) · [Español](#español)
 
@@ -6,7 +6,7 @@ App para macOS que faz o backup dos cartões de memória depois de uma gravaçã
 
 ## Baixar
 
-Baixe o `.dmg` mais recente em **[Releases](../../releases/latest)**, abra e arraste o Offload para Aplicativos.
+Baixe o `.dmg` mais recente em **[Releases](../../releases/latest)**, abra e arraste o Acervo para Aplicativos.
 
 Na primeira abertura, o macOS avisa que não pode verificar o desenvolvedor (o app não é assinado pela Apple). Para liberar: abra o app uma vez, vá em **Ajustes do Sistema > Privacidade e Segurança**, role até o fim e clique em **Abrir Mesmo Assim**.
 
@@ -41,8 +41,8 @@ Etiquetas: `{PASTA}` nome da pasta da captação · `{NOME}` só o nome · `{AAA
 Precisa das ferramentas de linha de comando do Xcode (`xcode-select --install`).
 
 ```bash
-./build.sh      # gera build/Offload.app
-./release.sh    # gera dist/Offload-<versão>.dmg para compartilhar
+./build.sh      # gera build/Acervo.app
+./release.sh    # gera dist/Acervo-<versão>.dmg para compartilhar
 ```
 
 ---
@@ -51,7 +51,7 @@ Precisa das ferramentas de linha de comando do Xcode (`xcode-select --install`).
 
 A macOS app that backs up memory cards after a shoot: it creates the shoot folder, copies videos, photos, audio and anything else you want into the right subfolders, names files with your own pattern, verifies every copy byte by byte (SHA-256) and makes redundant copies on other drives.
 
-**Download** the latest `.dmg` from **[Releases](../../releases/latest)** and drag Offload to Applications. The first time, macOS can't verify the developer (the app isn't signed by Apple): open it once, then go to **System Settings > Privacy & Security**, scroll down and click **Open Anyway**.
+**Download** the latest `.dmg` from **[Releases](../../releases/latest)** and drag Acervo to Applications. The first time, macOS can't verify the developer (the app isn't signed by Apple): open it once, then go to **System Settings > Privacy & Security**, scroll down and click **Open Anyway**.
 
 On first launch you choose the main drive, optional redundancy drives, the folder and subfolder structure (and which file types each subfolder gets) and how files are named. Tags: `{FOLDER}` `{NAME}` `{YYYY}` `{YY}` `{MM}` `{DD}` `{NNN}` `{ORIGINAL}`.
 
@@ -61,7 +61,7 @@ Requires macOS 14 or later (Apple Silicon or Intel). Available in English, Portu
 
 App para macOS que hace la copia de seguridad de las tarjetas de memoria después de un rodaje: crea la carpeta del rodaje, copia videos, fotos, audios y lo que quieras a las subcarpetas correctas, nombra los archivos con tu propio patrón, verifica cada copia byte a byte (SHA-256) y hace copias de redundancia en otros discos.
 
-**Descarga** el `.dmg` más reciente en **[Releases](../../releases/latest)** y arrastra Offload a Aplicaciones. La primera vez, macOS no puede verificar al desarrollador (la app no está firmada por Apple): ábrela una vez, ve a **Ajustes del Sistema > Privacidad y Seguridad**, baja hasta el final y haz clic en **Abrir igualmente**.
+**Descarga** el `.dmg` más reciente en **[Releases](../../releases/latest)** y arrastra Acervo a Aplicaciones. La primera vez, macOS no puede verificar al desarrollador (la app no está firmada por Apple): ábrela una vez, ve a **Ajustes del Sistema > Privacidad y Seguridad**, baja hasta el final y haz clic en **Abrir igualmente**.
 
 En el primer uso eliges el disco principal, los discos de redundancia (opcional), la estructura de carpetas y subcarpetas (y qué tipos de archivo recibe cada una) y cómo se nombran los archivos. Etiquetas: `{CARPETA}` `{NOMBRE}` `{AAAA}` `{AA}` `{MM}` `{DD}` `{NNN}` `{ORIGINAL}`.
 

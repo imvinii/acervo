@@ -1,4 +1,4 @@
-OFFLOAD
+ACERVO
 Português · English · Español
 
 ======================================================================
@@ -8,12 +8,12 @@ Backup dos cartões de memória depois de uma gravação, com conferência
 de cada arquivo e cópia de redundância em outros discos.
 
 INSTALAR
-1. Arraste "Offload" para a pasta Applications (Aplicativos).
+1. Arraste "Acervo" para a pasta Applications (Aplicativos).
 2. Na primeira vez, o macOS avisa que não pode verificar o desenvolvedor
    (o app não é distribuído pela App Store). Para liberar:
    - Abra o app uma vez e feche o aviso.
    - Vá em Ajustes do Sistema > Privacidade e Segurança, role até o fim
-     e clique em "Abrir Mesmo Assim" ao lado de "Offload".
+     e clique em "Abrir Mesmo Assim" ao lado de "Acervo".
    - Confirme com a senha do Mac. Depois disso ele abre normalmente.
 
 PRIMEIRA ABERTURA
@@ -37,12 +37,12 @@ Backs up memory cards after a shoot, verifying every file and making
 redundant copies on other drives.
 
 INSTALL
-1. Drag "Offload" to the Applications folder.
+1. Drag "Acervo" to the Applications folder.
 2. The first time, macOS says it can't verify the developer (the app
    isn't distributed through the App Store). To allow it:
    - Open the app once and close the warning.
    - Go to System Settings > Privacy & Security, scroll to the bottom
-     and click "Open Anyway" next to "Offload".
+     and click "Open Anyway" next to "Acervo".
    - Confirm with your Mac password. After that it opens normally.
 
 FIRST LAUNCH
@@ -66,12 +66,12 @@ Copia de seguridad de las tarjetas de memoria después de un rodaje,
 verificando cada archivo y con copias de redundancia en otros discos.
 
 INSTALAR
-1. Arrastra "Offload" a la carpeta Aplicaciones (Applications).
+1. Arrastra "Acervo" a la carpeta Aplicaciones (Applications).
 2. La primera vez, macOS avisa que no puede verificar al desarrollador
    (la app no se distribuye por la App Store). Para permitirla:
    - Abre la app una vez y cierra el aviso.
    - Ve a Ajustes del Sistema > Privacidad y Seguridad, baja hasta el
-     final y haz clic en "Abrir igualmente" junto a "Offload".
+     final y haz clic en "Abrir igualmente" junto a "Acervo".
    - Confirma con la contraseña del Mac. Después se abre normalmente.
 
 PRIMER USO
