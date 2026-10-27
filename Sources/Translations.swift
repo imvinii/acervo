@@ -166,6 +166,7 @@ enum Translations {
         "Vértice (Vídeos, Fotos/Brutas, Fotos/Seleção, Áudios, Documentos)": ("Vértice (Vídeos, Fotos/Brutas, Fotos/Seleção, Áudios, Documentos)", "Vértice (Vídeos, Fotos/Brutas, Fotos/Seleção, Áudios, Documentos)"),
         "Começar": ("Get started", "Empezar"),
         "Salvar": ("Save", "Guardar"),
+        "Sair": ("Quit", "Salir"),
         "Escolha o disco principal.": ("Choose the main drive.", "Elige el disco principal."),
         "O nome da pasta da captação não pode ficar vazio.": ("The shoot folder name can’t be empty.", "El nombre de la carpeta del rodaje no puede quedar vacío."),
         "A redundância precisa ser uma pasta diferente da do disco principal.": ("Redundancy must be a different folder from the main drive’s.", "La redundancia debe ser una carpeta distinta de la del disco principal."),

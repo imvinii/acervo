@@ -1,4 +1,4 @@
-// Importar Cartão: backup dos cartões depois de uma gravação.
+// Offload: backup dos cartões depois de uma gravação.
 // Substitui os atalhos "Criar projeto" e "Importar SD".
 
 import SwiftUI
@@ -6,11 +6,11 @@ import AppKit
 import UserNotifications
 
 enum AppInfo {
-    static let name = "Importar Cartão"
+    static let name = "Offload"
 }
 
 @main
-struct ImportarCartaoApp: App {
+struct OffloadApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = Model()
     var body: some Scene {

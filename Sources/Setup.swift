@@ -60,7 +60,15 @@ struct SetupView: View {
                 .fixedSize()
                 Spacer()
                 if let problem { Text(problem).font(.caption).foregroundStyle(.orange) }
-                if !firstRun { Button(L("Cancelar")) { dismiss() }.keyboardShortcut(.cancelAction) }
+                if firstRun {
+                    // A tela de boas-vindas não fecha sozinha; sem isto não daria para sair do app.
+                    Button(L("Sair")) {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { NSApp.terminate(nil) }
+                    }
+                } else {
+                    Button(L("Cancelar")) { dismiss() }.keyboardShortcut(.cancelAction)
+                }
                 Button(firstRun ? L("Começar") : L("Salvar")) {
                     model.config = draft
                     dismiss()

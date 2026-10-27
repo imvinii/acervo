@@ -1,28 +1,92 @@
-IMPORTAR CARTÃO
-Backup dos cartões de memória depois de uma gravação, com conferência de cada arquivo.
+OFFLOAD
+Português · English · Español
+
+======================================================================
+PORTUGUÊS
+======================================================================
+Backup dos cartões de memória depois de uma gravação, com conferência
+de cada arquivo e cópia de redundância em outros discos.
 
 INSTALAR
-1. Arraste "Importar Cartão" para a pasta Aplicativos.
+1. Arraste "Offload" para a pasta Applications (Aplicativos).
 2. Na primeira vez, o macOS avisa que não pode verificar o desenvolvedor
    (o app não é distribuído pela App Store). Para liberar:
    - Abra o app uma vez e feche o aviso.
    - Vá em Ajustes do Sistema > Privacidade e Segurança, role até o fim
-     e clique em "Abrir Mesmo Assim" ao lado de "Importar Cartão".
+     e clique em "Abrir Mesmo Assim" ao lado de "Offload".
    - Confirme com a senha do Mac. Depois disso ele abre normalmente.
 
 PRIMEIRA ABERTURA
-O app pede:
-- Destino principal: a pasta (num SSD, por exemplo) onde ficam as captações.
-- Redundância (opcional): uma pasta em outro disco que recebe uma cópia idêntica.
-- Como nomear a pasta de cada captação e os arquivos (há modelos prontos).
-Tudo pode ser mudado depois em Importar Cartão > Ajustes (⌘,).
+- Disco principal: onde o backup é feito.
+- Discos de redundância (opcional): recebem uma cópia idêntica.
+- Pasta de cada captação: nome da pasta e subpastas (e o que cada uma recebe).
+- Nome dos arquivos: renomear ou manter o nome original.
+Tudo pode ser mudado depois em Ajustes (⌘,).
 
-COMO USAR
+USAR
 1. Coloque o cartão no leitor (ou escolha uma pasta).
 2. Escolha a captação ou crie uma nova.
-3. Marque o que importar (vídeos, fotos RAW, áudios MP3/WAV, documentos PDF/Word)
-   e clique em Importar.
+3. Marque o que importar e clique em Importar.
 Cada arquivo é relido depois da cópia e comparado com o original. Nada é
 sobrescrito, e o cartão só é limpo se você pedir, no fim.
 
-Requer macOS 14 (Sonoma) ou mais novo. Funciona em Mac com Apple Silicon e Intel.
+======================================================================
+ENGLISH
+======================================================================
+Backs up memory cards after a shoot, verifying every file and making
+redundant copies on other drives.
+
+INSTALL
+1. Drag "Offload" to the Applications folder.
+2. The first time, macOS says it can't verify the developer (the app
+   isn't distributed through the App Store). To allow it:
+   - Open the app once and close the warning.
+   - Go to System Settings > Privacy & Security, scroll to the bottom
+     and click "Open Anyway" next to "Offload".
+   - Confirm with your Mac password. After that it opens normally.
+
+FIRST LAUNCH
+- Main drive: where the backup goes.
+- Redundancy drives (optional): receive an identical copy.
+- Folder for each shoot: folder name and subfolders (and what each receives).
+- File names: rename or keep the original name.
+You can change everything later in Settings (⌘,).
+
+USE
+1. Insert the card (or choose a folder).
+2. Choose a shoot or create a new one.
+3. Check what to import and click Import.
+Every file is read back after copying and compared with the original.
+Nothing is overwritten, and the card is only erased if you ask, at the end.
+
+======================================================================
+ESPAÑOL
+======================================================================
+Copia de seguridad de las tarjetas de memoria después de un rodaje,
+verificando cada archivo y con copias de redundancia en otros discos.
+
+INSTALAR
+1. Arrastra "Offload" a la carpeta Aplicaciones (Applications).
+2. La primera vez, macOS avisa que no puede verificar al desarrollador
+   (la app no se distribuye por la App Store). Para permitirla:
+   - Abre la app una vez y cierra el aviso.
+   - Ve a Ajustes del Sistema > Privacidad y Seguridad, baja hasta el
+     final y haz clic en "Abrir igualmente" junto a "Offload".
+   - Confirma con la contraseña del Mac. Después se abre normalmente.
+
+PRIMER USO
+- Disco principal: donde se hace la copia.
+- Discos de redundancia (opcional): reciben una copia idéntica.
+- Carpeta de cada rodaje: nombre de la carpeta y subcarpetas (y qué recibe cada una).
+- Nombre de los archivos: renombrar o mantener el nombre original.
+Puedes cambiarlo todo después en Ajustes (⌘,).
+
+USAR
+1. Inserta la tarjeta (o elige una carpeta).
+2. Elige un rodaje o crea uno nuevo.
+3. Marca qué importar y haz clic en Importar.
+Cada archivo se vuelve a leer tras copiarlo y se compara con el original.
+No se sobrescribe nada, y la tarjeta solo se borra si lo pides, al final.
+
+----------------------------------------------------------------------
+macOS 14 (Sonoma) or later · Apple Silicon and Intel

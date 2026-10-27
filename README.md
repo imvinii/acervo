@@ -1,39 +1,68 @@
-# Importar Cartão
+# Offload
 
-App para macOS que faz o backup dos cartões de memória depois de uma gravação: cria a pasta da captação, copia vídeos, fotos RAW, áudios e documentos com o nome no padrão que você escolher, confere cada cópia byte a byte (SHA-256) e, se você quiser, faz uma segunda cópia em outro disco.
+**Português** · [English](#english) · [Español](#español)
+
+App para macOS que faz o backup dos cartões de memória depois de uma gravação: cria a pasta da captação, copia vídeos, fotos, áudios e o que mais você quiser para as subpastas certas, com o nome no padrão que você escolher, confere cada cópia byte a byte (SHA-256) e faz cópias de redundância em outros discos.
 
 ## Baixar
 
-Baixe o `.dmg` mais recente em **Releases**, abra e arraste o app para Aplicativos. Na primeira abertura, o macOS pede para liberar o app em Ajustes do Sistema > Privacidade e Segurança > "Abrir Mesmo Assim" (ele não é assinado pela Apple). Detalhes em [LEIA-ME.txt](LEIA-ME.txt).
+Baixe o `.dmg` mais recente em **[Releases](../../releases/latest)**, abra e arraste o Offload para Aplicativos.
 
-Requer macOS 14 ou mais novo (Apple Silicon ou Intel).
+Na primeira abertura, o macOS avisa que não pode verificar o desenvolvedor (o app não é assinado pela Apple). Para liberar: abra o app uma vez, vá em **Ajustes do Sistema > Privacidade e Segurança**, role até o fim e clique em **Abrir Mesmo Assim**.
+
+Requer macOS 14 ou mais novo, em Mac com Apple Silicon ou Intel. Em português, inglês e espanhol, seguindo o idioma do sistema.
 
 ## O que ele faz
 
-- Detecta o cartão sozinho (ou uma pasta escolhida à mão).
+- Detecta o cartão sozinho (ou usa uma pasta escolhida à mão).
 - Lista as captações com a mais recente no topo, com busca, e cria captações novas.
-- Importa vídeos (MP4, MOV, MXF, BRAW), fotos RAW (CR2, CR3, ARW, NEF, RAF, RW2, ORF, DNG), áudios (MP3 e WAV) e, se marcado, documentos (PDF, Word, Pages, RTF, ODT).
-- Numera na ordem de gravação e continua a numeração que já existe na pasta.
+- Cada subpasta da captação recebe os tipos de arquivo que você definir: vídeos (MP4, MOV, MXF, BRAW), fotos RAW (CR2, CR3, ARW, NEF, RAF, RW2, ORF, DNG), JPG/HEIC, áudios (MP3, WAV), documentos (PDF, Word…), PSD/AI ou qualquer extensão.
+- Renomeia os arquivos com o nome da pasta da captação ou um padrão seu, numerando na ordem de gravação e continuando a numeração que já existe. Ou mantém os nomes originais.
 - Reconhece o que já foi importado (nesta ou em outra captação) e não copia de novo.
-- Cópia de redundância opcional num segundo disco, com a mesma pasta e os mesmos nomes.
-- Limpeza opcional do cartão, só do que bater byte a byte com a cópia.
+- Copia ao mesmo tempo para um ou mais discos de redundância, com a mesma pasta e os mesmos nomes.
+- Limpa o cartão no fim, se você pedir, só depois de reler e comparar cada arquivo com a cópia.
 
 ## Configuração
 
 Na primeira abertura (e depois em **Ajustes**, ⌘,):
 
-- **Destino principal** e **redundância** (opcional).
-- **Nome da pasta da captação**, ex.: `{AAAA}{MM}{DD} - {NOME}` → `20261027 - CASAMENTO ANA`.
-- **Subpastas** de cada tipo e pastas extras vazias (ex.: `Fotos/Seleção`).
-- **Nome dos arquivos** por tipo, ex.: `{PASTA} - {NNN}` → `20261027 - CASAMENTO ANA - 001.MP4`.
+| | |
+|---|---|
+| **Disco principal** | onde o backup é feito |
+| **Discos de redundância** | cópias idênticas em outros discos (opcional) |
+| **Pasta de cada captação** | ex.: `{AAAA}{MM}{DD} - {NOME}` → `20261027 - CASAMENTO ANA`, e as subpastas com o que cada uma recebe |
+| **Nome dos arquivos** | ex.: `{PASTA} - {NNN}` → `20261027 - CASAMENTO ANA - 001.MP4` |
+| **Discos ignorados** | discos de trabalho que nunca devem aparecer como cartão |
 
-Etiquetas: `{PASTA}` nome da pasta da captação, `{NOME}` só o nome, `{AAAA}` `{AA}` `{MM}` `{DD}` data, `{N}` `{NN}` `{NNN}`… número com esse tanto de dígitos, `{ORIGINAL}` nome do arquivo no cartão.
+Etiquetas: `{PASTA}` nome da pasta da captação · `{NOME}` só o nome · `{AAAA}` `{AA}` `{MM}` `{DD}` data · `{N}` `{NN}` `{NNN}`… número com esse tanto de dígitos · `{ORIGINAL}` nome do arquivo no cartão. Também valem em inglês (`{FOLDER}`, `{NAME}`, `{YYYY}`) e espanhol (`{CARPETA}`, `{NOMBRE}`).
 
 ## Compilar
 
 Precisa das ferramentas de linha de comando do Xcode (`xcode-select --install`).
 
 ```bash
-./build.sh      # gera build/Importar Cartão.app
-./release.sh    # gera dist/Importar-Cartao-<versão>.dmg para compartilhar
+./build.sh      # gera build/Offload.app
+./release.sh    # gera dist/Offload-<versão>.dmg para compartilhar
 ```
+
+---
+
+## English
+
+A macOS app that backs up memory cards after a shoot: it creates the shoot folder, copies videos, photos, audio and anything else you want into the right subfolders, names files with your own pattern, verifies every copy byte by byte (SHA-256) and makes redundant copies on other drives.
+
+**Download** the latest `.dmg` from **[Releases](../../releases/latest)** and drag Offload to Applications. The first time, macOS can't verify the developer (the app isn't signed by Apple): open it once, then go to **System Settings > Privacy & Security**, scroll down and click **Open Anyway**.
+
+On first launch you choose the main drive, optional redundancy drives, the folder and subfolder structure (and which file types each subfolder gets) and how files are named. Tags: `{FOLDER}` `{NAME}` `{YYYY}` `{YY}` `{MM}` `{DD}` `{NNN}` `{ORIGINAL}`.
+
+Requires macOS 14 or later (Apple Silicon or Intel). Available in English, Portuguese and Spanish, following the system language.
+
+## Español
+
+App para macOS que hace la copia de seguridad de las tarjetas de memoria después de un rodaje: crea la carpeta del rodaje, copia videos, fotos, audios y lo que quieras a las subcarpetas correctas, nombra los archivos con tu propio patrón, verifica cada copia byte a byte (SHA-256) y hace copias de redundancia en otros discos.
+
+**Descarga** el `.dmg` más reciente en **[Releases](../../releases/latest)** y arrastra Offload a Aplicaciones. La primera vez, macOS no puede verificar al desarrollador (la app no está firmada por Apple): ábrela una vez, ve a **Ajustes del Sistema > Privacidad y Seguridad**, baja hasta el final y haz clic en **Abrir igualmente**.
+
+En el primer uso eliges el disco principal, los discos de redundancia (opcional), la estructura de carpetas y subcarpetas (y qué tipos de archivo recibe cada una) y cómo se nombran los archivos. Etiquetas: `{CARPETA}` `{NOMBRE}` `{AAAA}` `{AA}` `{MM}` `{DD}` `{NNN}` `{ORIGINAL}`.
+
+Requiere macOS 14 o posterior (Apple Silicon o Intel). Disponible en español, portugués e inglés, según el idioma del sistema.
