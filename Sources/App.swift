@@ -20,7 +20,7 @@ struct OffloadApp: App {
                 .frame(minWidth: 980, minHeight: 640)
         }
         .windowToolbarStyle(.unifiedCompact)
-        .defaultSize(width: 1060, height: 720)
+        .defaultSize(width: 1100, height: 820)
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button(L("Ajustes…")) { model.showSetup = true }.keyboardShortcut(",")

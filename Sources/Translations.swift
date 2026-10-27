@@ -209,30 +209,52 @@ enum Translations {
         "Subpasta:": ("Subfolder:", "Subcarpeta:"),
         "nome da subpasta": ("subfolder name", "nombre de la subcarpeta"),
         "recebe:": ("gets:", "recibe:"),
-        "nada (pasta vazia)": ("nothing (empty folder)", "nada (carpeta vacía)"),
         "Nada (pasta vazia)": ("Nothing (empty folder)", "Nada (carpeta vacía)"),
         "Tipos de arquivo": ("File types", "Tipos de archivo"),
         "Remover subpasta": ("Remove subfolder", "Quitar subcarpeta"),
         "Adicionar subpasta": ("Add subfolder", "Añadir subcarpeta"),
-        "Use / para uma subpasta dentro de outra (ex.: Fotos/Brutas). Em “recebe”, escreva as extensões separadas por vírgula (ex.: psd, ai) ou escolha um modelo na lista. Sem extensões, a subpasta é criada vazia. Arquivos de tipos que não estão em nenhuma subpasta ficam no cartão.":
-            ("Use / for a subfolder inside another (e.g. Photos/Raw). In “gets”, type the extensions separated by commas (e.g. psd, ai) or pick a template from the list. With no extensions, the subfolder is created empty. File types that aren’t in any subfolder stay on the card.",
-             "Usa / para una subcarpeta dentro de otra (ej.: Fotos/Brutas). En “recibe”, escribe las extensiones separadas por comas (ej.: psd, ai) o elige una plantilla de la lista. Sin extensiones, la subcarpeta se crea vacía. Los tipos de archivo que no estén en ninguna subcarpeta se quedan en la tarjeta."),
 
         "Nome dos arquivos": ("File names", "Nombre de los archivos"),
-        "Como os arquivos ficam depois de importados. Cada linha vale para os arquivos de uma subpasta.":
-            ("How files are named after import. Each row applies to the files of one subfolder.", "Cómo quedan los archivos tras importarlos. Cada fila vale para los archivos de una subcarpeta."),
         "Renomear os arquivos ao importar": ("Rename files when importing", "Renombrar los archivos al importar"),
         "Usa o nome da pasta da captação (ou o padrão que você definir abaixo). Desmarcado, cada arquivo mantém o nome que veio do cartão, ex.: C0001.MP4.":
             ("Uses the shoot folder name (or the pattern you set below). Unchecked, each file keeps the name it had on the card, e.g. C0001.MP4.",
              "Usa el nombre de la carpeta del rodaje (o el patrón que definas abajo). Desmarcado, cada archivo conserva el nombre de la tarjeta, ej.: C0001.MP4."),
-        "Adicionar tipo de arquivo": ("Add file type", "Añadir tipo de archivo"),
-        "Escolha a subpasta": ("Choose the subfolder", "Elige la subcarpeta"),
-        "(sem nome)": ("(no name)", "(sin nombre)"),
         "Modelos prontos": ("Templates", "Plantillas"),
         "Sem número nem {ORIGINAL}, os arquivos vão ganhar (2), (3)… no fim.": ("Without a number or {ORIGINAL}, files will get (2), (3)… at the end.", "Sin número ni {ORIGINAL}, los archivos recibirán (2), (3)… al final."),
-        "Etiquetas: {0} nome da pasta da captação · {1} só o nome · {2} {MM} {DD} data · {NNN} número com 3 dígitos (use {N}, {NN}, {NNNN}… para outros tamanhos; continua de onde a pasta parou) · {ORIGINAL} nome do arquivo no cartão. A extensão (.MP4, .WAV…) entra sozinha. Subpastas sem linha aqui mantêm o nome original.":
-            ("Tags: {0} shoot folder name · {1} name only · {2} {MM} {DD} date · {NNN} 3-digit number (use {N}, {NN}, {NNNN}… for other lengths; continues where the folder left off) · {ORIGINAL} file name on the card. The extension (.MP4, .WAV…) is added automatically. Subfolders without a row here keep the original name.",
-             "Etiquetas: {0} nombre de la carpeta del rodaje · {1} solo el nombre · {2} {MM} {DD} fecha · {NNN} número de 3 dígitos (usa {N}, {NN}, {NNNN}… para otros tamaños; continúa donde quedó la carpeta) · {ORIGINAL} nombre del archivo en la tarjeta. La extensión (.MP4, .WAV…) se añade sola. Las subcarpetas sin fila aquí conservan el nombre original."),
+
+        // Ícones das subpastas
+        "Escolher ícone": ("Choose icon", "Elegir icono"),
+        "Automático (pelo tipo de arquivo)": ("Automatic (by file type)", "Automático (según el tipo de archivo)"),
+        "Pasta": ("Folder", "Carpeta"),
+        "Vídeo": ("Video", "Video"),
+        "Filme": ("Film", "Película"),
+        "Câmera": ("Camera", "Cámara"),
+        "Foto": ("Photo", "Foto"),
+        "Áudio": ("Audio", "Audio"),
+        "Microfone": ("Microphone", "Micrófono"),
+        "Música": ("Music", "Música"),
+        "Documento": ("Document", "Documento"),
+        "Design": ("Design", "Diseño"),
+        "3D": ("3D", "3D"),
+        "Legenda": ("Subtitles", "Subtítulos"),
+        "Favoritos": ("Favorites", "Favoritos"),
+        "Arquivo": ("Archive", "Archivo"),
+        "Drone": ("Drone", "Dron"),
+        "Pessoas": ("People", "Personas"),
+        "extensões, ex.: psd, ai": ("extensions, e.g. psd, ai", "extensiones, ej.: psd, ai"),
+        "Em “recebe”, escreva a extensão dos arquivos que vão para essa subpasta, que são as letras depois do ponto no nome (ex.: Arte.psd → psd). Siga o formato das outras linhas: só as letras, separadas por vírgula (ex.: psd, ai). Ou escolha um tipo pronto na lista ao lado. Sem extensões, a subpasta é criada vazia. Arquivos de tipos que não estão em nenhuma subpasta ficam no cartão. Use / para uma subpasta dentro de outra (ex.: Fotos/Brutas). Clique no ícone para trocá-lo.":
+            ("In “gets”, type the extension of the files that go into this subfolder: the letters after the dot in the file name (e.g. Art.psd → psd). Follow the format of the other rows: just the letters, separated by commas (e.g. psd, ai). Or pick a ready-made type from the list next to it. With no extensions, the subfolder is created empty. File types that aren’t in any subfolder stay on the card. Use / for a subfolder inside another (e.g. Photos/Raw). Click the icon to change it.",
+             "En “recibe”, escribe la extensión de los archivos que van a esa subcarpeta: las letras después del punto en el nombre (ej.: Arte.psd → psd). Sigue el formato de las otras filas: solo las letras, separadas por comas (ej.: psd, ai). O elige un tipo listo en la lista de al lado. Sin extensiones, la subcarpeta se crea vacía. Los tipos de archivo que no estén en ninguna subcarpeta se quedan en la tarjeta. Usa / para una subcarpeta dentro de otra (ej.: Fotos/Brutas). Haz clic en el icono para cambiarlo."),
+
+        // Nome dos arquivos
+        "Padrão próprio": ("Custom pattern", "Patrón propio"),
+        "Nome original da câmera": ("Original camera name", "Nombre original de la cámara"),
+        "Como os arquivos ficam depois de importados. Com Renomear marcado, todos levam o nome da pasta da captação e um número. Para um tipo de arquivo seguir outro padrão, ligue “Padrão próprio” na linha dele.":
+            ("How files are named after import. With Rename checked, they all get the shoot folder name and a number. To give a file type a different pattern, turn on “Custom pattern” in its row.",
+             "Cómo quedan los archivos tras importarlos. Con Renombrar marcado, todos llevan el nombre de la carpeta del rodaje y un número. Para que un tipo de archivo siga otro patrón, activa “Patrón propio” en su fila."),
+        "Etiquetas: {0} nome da pasta da captação · {1} só o nome · {2} {MM} {DD} data · {NNN} número com 3 dígitos (use {N}, {NN}, {NNNN}… para outros tamanhos; continua de onde a pasta parou) · {ORIGINAL} nome do arquivo no cartão. A extensão (.MP4, .WAV…) entra sozinha.":
+            ("Tags: {0} shoot folder name · {1} name only · {2} {MM} {DD} date · {NNN} 3-digit number (use {N}, {NN}, {NNNN}… for other lengths; continues where the folder left off) · {ORIGINAL} file name on the card. The extension (.MP4, .WAV…) is added automatically.",
+             "Etiquetas: {0} nombre de la carpeta del rodaje · {1} solo el nombre · {2} {MM} {DD} fecha · {NNN} número de 3 dígitos (usa {N}, {NN}, {NNNN}… para otros tamaños; continúa donde quedó la carpeta) · {ORIGINAL} nombre del archivo en la tarjeta. La extensión (.MP4, .WAV…) se añade sola."),
 
         "Discos que não aparecem como cartão": ("Drives that never show up as cards", "Discos que no aparecen como tarjeta"),
         "O app mostra como cartão todo disco removível que for conectado. Para não correr o risco de importar (ou limpar) os arquivos de um disco de trabalho, coloque aqui os discos que são seguros e nunca são cartões, como SSDs e HDs de backup. Os discos principal e de redundância já ficam de fora sozinhos.":

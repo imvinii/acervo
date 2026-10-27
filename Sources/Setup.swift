@@ -79,7 +79,7 @@ struct SetupView: View {
             }
             .padding(20)
         }
-        .frame(width: 780, height: 760)
+        .frame(width: 780, height: 740)
         .interactiveDismissDisabled(firstRun)
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in volumes = Volume.mounted() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in volumes = Volume.mounted() }
@@ -178,7 +178,7 @@ struct SetupView: View {
             SectionHeader(L("Pasta de cada captação"),
                           L("Como o app cria a pasta de cada gravação e as subpastas que vão dentro dela. Cada subpasta recebe os tipos de arquivo que você escolher."))
         } footer: {
-            Text(L("Use / para uma subpasta dentro de outra (ex.: Fotos/Brutas). Em “recebe”, escreva as extensões separadas por vírgula (ex.: psd, ai) ou escolha um modelo na lista. Sem extensões, a subpasta é criada vazia. Arquivos de tipos que não estão em nenhuma subpasta ficam no cartão."))
+            Text(L("Em “recebe”, escreva a extensão dos arquivos que vão para essa subpasta, que são as letras depois do ponto no nome (ex.: Arte.psd → psd). Siga o formato das outras linhas: só as letras, separadas por vírgula (ex.: psd, ai). Ou escolha um tipo pronto na lista ao lado. Sem extensões, a subpasta é criada vazia. Arquivos de tipos que não estão em nenhuma subpasta ficam no cartão. Use / para uma subpasta dentro de outra (ex.: Fotos/Brutas). Clique no ícone para trocá-lo."))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -197,27 +197,33 @@ struct SetupView: View {
             .toggleStyle(.checkbox)
 
             Group {
-                ForEach($draft.rules) { $r in
-                    RuleRow(rule: $r, config: draft, sample: sample) { draft.rules.removeAll { $0.id == r.id } }
+                ForEach(draft.receivingFolders) { f in
+                    NamingRow(folder: f, own: ownPattern(f), config: draft, sample: sample)
                 }
-                let free = draft.receivingFolders.filter { f in !draft.rules.contains { $0.folder == f.id } }
-                Button {
-                    if let f = free.first { draft.rules.append(NamingRule(folder: f.id, pattern: "\(Tok.folder) - {NNN}")) }
-                } label: {
-                    Label(L("Adicionar tipo de arquivo"), systemImage: "plus.circle.fill")
-                }
-                .buttonStyle(.borderless)
-                .disabled(free.isEmpty)
             }
             .disabled(!draft.rename)
             .opacity(draft.rename ? 1 : 0.45)
         } header: {
             SectionHeader(L("Nome dos arquivos"),
-                          L("Como os arquivos ficam depois de importados. Cada linha vale para os arquivos de uma subpasta."))
+                          L("Como os arquivos ficam depois de importados. Com Renomear marcado, todos levam o nome da pasta da captação e um número. Para um tipo de arquivo seguir outro padrão, ligue “Padrão próprio” na linha dele."))
         } footer: {
-            Text(L("Etiquetas: {0} nome da pasta da captação · {1} só o nome · {2} {MM} {DD} data · {NNN} número com 3 dígitos (use {N}, {NN}, {NNNN}… para outros tamanhos; continua de onde a pasta parou) · {ORIGINAL} nome do arquivo no cartão. A extensão (.MP4, .WAV…) entra sozinha. Subpastas sem linha aqui mantêm o nome original.", Tok.folder, Tok.name, Tok.year))
+            Text(L("Etiquetas: {0} nome da pasta da captação · {1} só o nome · {2} {MM} {DD} data · {NNN} número com 3 dígitos (use {N}, {NN}, {NNNN}… para outros tamanhos; continua de onde a pasta parou) · {ORIGINAL} nome do arquivo no cartão. A extensão (.MP4, .WAV…) entra sozinha.", Tok.folder, Tok.name, Tok.year))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// Padrão próprio de uma subpasta (nil = segue o padrão geral).
+    func ownPattern(_ f: Subfolder) -> Binding<String?> {
+        Binding(
+            get: { draft.rules.first { $0.folder == f.id }?.pattern },
+            set: { p in
+                if let p {
+                    if let i = draft.rules.firstIndex(where: { $0.folder == f.id }) { draft.rules[i].pattern = p }
+                    else { draft.rules.append(NamingRule(folder: f.id, pattern: p)) }
+                } else {
+                    draft.rules.removeAll { $0.folder == f.id }
+                }
+            })
     }
 
     // MARK: Discos ignorados
@@ -382,12 +388,23 @@ struct SubfolderRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: folder.symbol).foregroundStyle(.secondary).frame(width: 18)
+            Menu {
+                Button(L("Automático (pelo tipo de arquivo)")) { folder.icon = nil }
+                Divider()
+                ForEach(Subfolder.icons, id: \.0) { icon in
+                    Button { folder.icon = icon.0 } label: { Label(icon.1, systemImage: icon.0) }
+                }
+            } label: {
+                Image(systemName: folder.symbol)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help(L("Escolher ícone"))
             Text(L("Subpasta:")).fixedSize().frame(minWidth: 70, alignment: .leading)
             TextField("", text: $folder.path, prompt: Text(L("nome da subpasta")))
                 .textFieldStyle(.roundedBorder).labelsHidden().multilineTextAlignment(.leading)
             Text(L("recebe:")).foregroundStyle(.secondary)
-            TextField("", text: $extText, prompt: Text(L("nada (pasta vazia)")))
+            TextField("", text: $extText, prompt: Text(L("extensões, ex.: psd, ai")))
                 .textFieldStyle(.roundedBorder).labelsHidden().multilineTextAlignment(.leading)
                 .frame(width: 230)
                 .onChange(of: extText) { _, t in folder.extensions = Subfolder.parse(t) }
@@ -412,12 +429,20 @@ struct SubfolderRow: View {
     }
 }
 
-/// Linha "[subpasta ▾]  [padrão] [modelos] [–]" com o exemplo embaixo.
-struct RuleRow: View {
-    @Binding var rule: NamingRule
+/// Linha de uma subpasta em "Nome dos arquivos": segue o padrão geral ou, com
+/// "Padrão próprio" ligado, mostra o campo para escrever outro padrão.
+struct NamingRow: View {
+    let folder: Subfolder
+    @Binding var own: String?
     let config: Config
     let sample: Capture
-    let onRemove: () -> Void
+
+    init(folder: Subfolder, own: Binding<String?>, config: Config, sample: Capture) {
+        self.folder = folder
+        _own = own
+        self.config = config
+        self.sample = sample
+    }
 
     static var presets: [(String, String)] {[
         ("\(L("CAPTAÇÃO")) - 001", "\(Tok.folder) - {NNN}"),
@@ -425,6 +450,7 @@ struct RuleRow: View {
         ("\(L("NOME"))_0001", "\(Tok.name)_{NNNN}"),
         ("20261027_001", "\(Tok.year){MM}{DD}_{NNN}"),
         ("\(L("CAPTAÇÃO")) - \(L("nome original"))", "\(Tok.folder) - {ORIGINAL}"),
+        (L("Nome original da câmera"), "{ORIGINAL}"),
     ]}
 
     /// Nome de arquivo de exemplo para os tipos da subpasta.
@@ -442,43 +468,45 @@ struct RuleRow: View {
         return URL(fileURLWithPath: name)
     }
 
+    var pattern: String { own ?? Config.defaultFilePattern }
+
     var example: String {
-        guard let f = config.folder(id: rule.folder) else { return "" }
         var c = config
         c.rename = true
-        c.rules = [NamingRule(folder: f.id, pattern: rule.pattern)]
-        let src = Self.sampleFile(f)
-        let first = Naming.fileName(c, folder: f, capture: sample, number: 1, source: src, date: Date())
-        guard Pattern.hasNumber(rule.pattern) else { return "\(src.lastPathComponent) → \(first)" }
-        let second = Naming.fileName(c, folder: f, capture: sample, number: 2, source: src, date: Date())
+        c.rules = own.map { [NamingRule(folder: folder.id, pattern: $0)] } ?? []
+        let src = Self.sampleFile(folder)
+        let first = Naming.fileName(c, folder: folder, capture: sample, number: 1, source: src, date: Date())
+        guard Pattern.hasNumber(pattern) else { return "\(src.lastPathComponent) → \(first)" }
+        let second = Naming.fileName(c, folder: folder, capture: sample, number: 2, source: src, date: Date())
         return "\(first), \(second)…"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Menu {
-                    ForEach(config.receivingFolders) { f in
-                        Button(f.trimmedPath) { rule.folder = f.id }
-                            .disabled(f.id != rule.folder && config.rules.contains { $0.folder == f.id })
-                    }
-                } label: {
-                    if let f = config.folder(id: rule.folder) {
-                        Label(f.trimmedPath.isEmpty ? L("(sem nome)") : f.trimmedPath, systemImage: f.symbol)
-                    } else {
-                        Text(L("Escolha a subpasta"))
-                    }
-                }
-                .frame(width: 180, alignment: .leading)
-                TextField("", text: $rule.pattern, prompt: Text("\(Tok.folder) - {NNN}"))
-                    .textFieldStyle(.roundedBorder).labelsHidden().multilineTextAlignment(.leading).font(.body.monospaced())
-                PresetMenu(presets: Self.presets) { rule.pattern = $0 }
-                Button(action: onRemove) { Image(systemName: "minus.circle.fill") }
-                    .buttonStyle(.borderless).foregroundStyle(.red).help(L("Remover"))
+                Image(systemName: folder.symbol).foregroundStyle(.secondary).frame(width: 18)
+                Text(folder.trimmedPath).font(.body.weight(.medium))
+                Spacer()
+                Text(L("Padrão próprio")).font(.callout).foregroundStyle(.secondary)
+                Toggle(L("Padrão próprio"), isOn: Binding(
+                    get: { own != nil },
+                    set: { on in own = on ? "\(Tok.folder) - {NNN}" : nil }))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .controlSize(.small)
             }
-            ExampleLine(example)
-            if !Pattern.hasNumber(rule.pattern) && !Pattern.hasOriginal(rule.pattern) && !rule.pattern.isEmpty {
+            if own != nil {
+                HStack(spacing: 8) {
+                    TextField("", text: Binding(get: { own ?? "" }, set: { own = $0 }), prompt: Text("\(Tok.folder) - {NNN}"))
+                        .textFieldStyle(.roundedBorder).labelsHidden().multilineTextAlignment(.leading).font(.body.monospaced())
+                    PresetMenu(presets: Self.presets) { own = $0 }
+                }
+                .padding(.leading, 26)
+            }
+            ExampleLine(example).padding(.leading, 26)
+            if let own, !own.isEmpty, !Pattern.hasNumber(own), !Pattern.hasOriginal(own) {
                 Text(L("Sem número nem {ORIGINAL}, os arquivos vão ganhar (2), (3)… no fim.")).font(.caption).foregroundStyle(.orange)
+                    .padding(.leading, 26)
             }
         }
         .padding(.vertical, 2)

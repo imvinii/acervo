@@ -52,6 +52,8 @@ struct Subfolder: Codable, Equatable, Hashable, Identifiable, Sendable {
     var id = UUID()
     var path: String
     var extensions: [String]
+    /// Ícone escolhido pela pessoa (nil = automático, pelo tipo de arquivo).
+    var icon: String?
 
     init(_ path: String, _ type: FileType?) {
         self.path = path
@@ -62,7 +64,17 @@ struct Subfolder: Codable, Equatable, Hashable, Identifiable, Sendable {
     var trimmedPath: String {
         path.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: "/")
     }
-    var symbol: String { FileType.matching(extensions)?.symbol ?? (extensions.isEmpty ? "folder" : "doc.fill") }
+    var symbol: String { icon ?? FileType.matching(extensions)?.symbol ?? (extensions.isEmpty ? "folder" : "doc.fill") }
+
+    /// Ícones que dá para escolher para uma subpasta (símbolo, nome).
+    static var icons: [(String, String)] {[
+        ("folder.fill", L("Pasta")), ("video.fill", L("Vídeo")), ("film.fill", L("Filme")),
+        ("camera.fill", L("Câmera")), ("photo.fill", L("Foto")), ("waveform", L("Áudio")),
+        ("mic.fill", L("Microfone")), ("music.note", L("Música")), ("doc.text.fill", L("Documento")),
+        ("paintbrush.pointed.fill", L("Design")), ("cube.fill", L("3D")), ("text.bubble.fill", L("Legenda")),
+        ("star.fill", L("Favoritos")), ("archivebox.fill", L("Arquivo")), ("airplane", L("Drone")),
+        ("person.2.fill", L("Pessoas")),
+    ]}
     var extensionsLabel: String { extensions.map { $0.uppercased() }.joined(separator: ", ") }
     /// Documentos só vêm marcados se a pessoa marcar; o resto já vem marcado.
     var onByDefault: Bool { !Set(extensions).isSubset(of: FileType.documentos.extensions) }
@@ -111,11 +123,15 @@ struct Config: Codable, Equatable, Sendable {
     }
     func folder(id: UUID) -> Subfolder? { folders.first { $0.id == id } }
 
-    /// Padrão de nome dos arquivos de uma subpasta; nil = nome original.
+    /// Com "Renomear" ligado, todo arquivo leva o nome da pasta da captação e um número.
+    static let defaultFilePattern = "{PASTA} - {NNN}"
+
+    /// Padrão de nome dos arquivos de uma subpasta: o próprio dela (se tiver) ou o padrão geral;
+    /// nil = nome original (Renomear desligado).
     func pattern(for f: Subfolder) -> String? {
-        guard rename, let p = rules.first(where: { $0.folder == f.id })?.pattern.trimmingCharacters(in: .whitespaces),
-              !p.isEmpty else { return nil }
-        return p
+        guard rename else { return nil }
+        let own = rules.first(where: { $0.folder == f.id })?.pattern.trimmingCharacters(in: .whitespaces) ?? ""
+        return own.isEmpty ? Self.defaultFilePattern : own
     }
 
     /// Subpastas criadas numa captação nova.
@@ -129,10 +145,9 @@ struct Config: Codable, Equatable, Sendable {
     static var simple: Config {
         let v = Subfolder(L("Vídeos"), .videos), f = Subfolder(L("Fotos"), .raw)
         let a = Subfolder(L("Áudios"), .audios), d = Subfolder(L("Documentos"), .documentos)
-        let p = "\(Tok.folder) - {NNN}"
         return Config(inbox: "", backups: [], folderPattern: "\(Tok.year){MM}{DD} - \(Tok.name)",
                       folders: [v, f, a, d], rename: false,
-                      rules: [NamingRule(folder: v.id, pattern: p), NamingRule(folder: a.id, pattern: p)],
+                      rules: [NamingRule(folder: d.id, pattern: "{ORIGINAL}")],
                       ignoredVolumes: [])
     }
 
@@ -144,9 +159,9 @@ struct Config: Codable, Equatable, Sendable {
         return Config(inbox: "/Volumes/Mídias/Inbox", backups: ["/Volumes/Projetos/Inbox (BACKUP)"],
                       folderPattern: "{AAAA}{MM}{DD} - {NOME}",
                       folders: [v, f, s, a, d], rename: true,
-                      rules: [NamingRule(folder: v.id, pattern: "{PASTA} - {NNN}"),
-                              NamingRule(folder: f.id, pattern: "{PASTA} - {NNN}"),
-                              NamingRule(folder: a.id, pattern: "{PASTA}.{N}")],
+                      // Vídeos e fotos seguem o padrão geral ({PASTA} - {NNN})
+                      rules: [NamingRule(folder: a.id, pattern: "{PASTA}.{N}"),
+                              NamingRule(folder: d.id, pattern: "{ORIGINAL}")],
                       ignoredVolumes: ["Elements"])
     }
 
