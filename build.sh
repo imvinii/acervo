@@ -33,8 +33,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.video</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSRemovableVolumesUsageDescription</key><string>Para ler os arquivos do cartão de memória.</string>
-  <key>CFBundleDevelopmentRegion</key><string>pt_BR</string>
+  <key>CFBundleDevelopmentRegion</key><string>pt-BR</string>
+  <key>CFBundleLocalizations</key><array><string>pt-BR</string><string>en</string><string>es</string></array>
 </dict></plist>
 PLIST
+# Pastas de idioma: fazem o macOS usar o idioma certo nos menus e janelas do sistema
+for l in pt-BR en es; do mkdir -p "$APP/Contents/Resources/$l.lproj"; touch "$APP/Contents/Resources/$l.lproj/Localizable.strings"; done
+echo '"NSRemovableVolumesUsageDescription" = "To read the files on the memory card.";' > "$APP/Contents/Resources/en.lproj/InfoPlist.strings"
+echo '"NSRemovableVolumesUsageDescription" = "Para leer los archivos de la tarjeta de memoria.";' > "$APP/Contents/Resources/es.lproj/InfoPlist.strings"
 codesign --force --deep -s - "$APP"
 echo "OK: $APP"

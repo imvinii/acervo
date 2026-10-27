@@ -5,21 +5,25 @@ import SwiftUI
 import AppKit
 import UserNotifications
 
+enum AppInfo {
+    static let name = "Importar Cartão"
+}
+
 @main
 struct ImportarCartaoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = Model()
     var body: some Scene {
-        Window("Importar Cartão", id: "main") {
+        Window(AppInfo.name, id: "main") {
             ContentView()
                 .environmentObject(model)
                 .frame(minWidth: 980, minHeight: 640)
         }
         .windowToolbarStyle(.unifiedCompact)
-        .defaultSize(width: 1060, height: 700)
+        .defaultSize(width: 1060, height: 720)
         .commands {
             CommandGroup(replacing: .appSettings) {
-                Button("Ajustes…") { model.showSetup = true }.keyboardShortcut(",")
+                Button(L("Ajustes…")) { model.showSetup = true }.keyboardShortcut(",")
             }
         }
     }
@@ -34,10 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard Model.isWorking else { return .terminateNow }
         let alert = NSAlert()
-        alert.messageText = "Há uma cópia em andamento"
-        alert.informativeText = "Se sair agora, ela é interrompida. O que já foi copiado e conferido fica salvo; importar de novo continua de onde parou."
-        alert.addButton(withTitle: "Continuar a cópia")
-        alert.addButton(withTitle: "Sair mesmo assim")
+        alert.messageText = L("Há uma cópia em andamento")
+        alert.informativeText = L("Se sair agora, ela é interrompida. O que já foi copiado e conferido fica salvo; importar de novo continua de onde parou.")
+        alert.addButton(withTitle: L("Continuar a cópia"))
+        alert.addButton(withTitle: L("Sair mesmo assim"))
         return alert.runModal() == .alertFirstButtonReturn ? .terminateCancel : .terminateNow
     }
 }
@@ -55,7 +59,14 @@ struct Card: Identifiable, Hashable {
 final class Model: ObservableObject {
     /// Discos, pastas e padrões de nome. Sem configuração salva, abre os Ajustes na primeira abertura.
     @Published var config: Config {
-        didSet { if oldValue != config { config.save(); reloadCaptures(); reloadCards(); refreshPlan() } }
+        didSet {
+            if oldValue != config {
+                config.save()
+                selected = selected.filter { id in config.receivingFolders.contains { $0.id == id } }
+                reloadCaptures(); reloadCards()
+                if let c = selectedCard { select(card: c) }
+            }
+        }
     }
     @Published var showSetup = false
 
@@ -69,12 +80,14 @@ final class Model: ObservableObject {
     @Published var files: [SourceFile] = [] { didSet { refreshPlan() } }
     @Published var scanning = false
 
-    @Published var kinds: Set<Kind> = Set(Kind.allCases.filter(\.onByDefault)) { didSet { if oldValue != kinds { refreshPlan() } } }
-    @Published var alsoBackup = UserDefaults.standard.object(forKey: "fazerBackup") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(alsoBackup, forKey: "fazerBackup"); refreshPlan() }
+    /// Subpastas marcadas para importar.
+    @Published var selected: Set<UUID> = [] { didSet { if oldValue != selected { refreshPlan() } } }
+    /// Discos de redundância desmarcados na hora de importar (lembrados entre aberturas).
+    @Published var backupsOff: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "redundanciasDesligadas") ?? []) {
+        didSet { UserDefaults.standard.set(Array(backupsOff), forKey: "redundanciasDesligadas"); refreshPlan() }
     }
 
-    /// O que vai ser copiado e o que já está na Inbox. Calculado em segundo plano,
+    /// O que vai ser copiado e o que já está no disco principal. Calculado em segundo plano,
     /// porque compara o cartão com os arquivos já importados.
     @Published var plan: ImportPlan?
     @Published var planning = false
@@ -104,7 +117,7 @@ final class Model: ObservableObject {
         let nc = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
             nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.reloadCaptures(); self?.reloadCards() }
+                Task { @MainActor in self?.reloadCaptures(); self?.reloadCards(); self?.refreshPlan() }
             }
         }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -123,16 +136,10 @@ final class Model: ObservableObject {
         if let s = selectedCapture, !captures.contains(s) { selectedCapture = nil }
     }
 
-    var backupAvailable: Bool { config.backupURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
-
-    /// Nome do disco onde está uma pasta ("Mídias", "Projetos"…).
-    static func diskName(_ url: URL) -> String {
-        let c = url.pathComponents
-        if c.count > 2, c[1] == "Volumes" { return c[2] }
-        return (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? "disco interno"
-    }
-    var inboxDisk: String { Self.diskName(config.inboxURL) }
-    var backupDisk: String { config.backupURL.map(Self.diskName) ?? "" }
+    var inboxDisk: String { Volume.name(of: config.inboxURL) }
+    func isConnected(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
+    /// Discos de redundância que vão receber a cópia agora (conectados e marcados).
+    var activeBackups: [URL] { config.backupURLs.filter { isConnected($0) && !backupsOff.contains($0.path) } }
 
     /// Pastas que os cartões das câmeras costumam ter.
     static let cameraFolders = ["DCIM", "PRIVATE", "CLIP", "M4ROOT", "XDROOT", "AVCHD", "Blackmagic RAW"]
@@ -140,19 +147,19 @@ final class Model: ObservableObject {
         cameraFolders.contains { FileManager.default.fileExists(atPath: url.appendingPathComponent($0).path) }
     }
 
-    // Cartões: volumes removíveis/ejetáveis, menos os discos de destino e os ocultos.
+    // Cartões: volumes removíveis/ejetáveis, menos os discos de destino e os ignorados.
     func reloadCards() {
         let keys: [URLResourceKey] = [.volumeNameKey, .volumeIsRemovableKey, .volumeIsEjectableKey, .volumeIsInternalKey]
         let vols = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
         func norm(_ s: String) -> String { s.precomposedStringWithCanonicalMapping }
-        let workDisks = Set(([config.inboxURL] + [config.backupURL].compactMap { $0 })
-            .filter { $0.path != "/" }.map { norm($0.pathComponents.prefix(3).joined(separator: "/")) })
-        let workNames = Set(config.ignoredVolumes.map(norm))
+        let workDisks = Set(([config.inboxURL] + config.backupURLs)
+            .filter { $0.path.hasPrefix("/Volumes/") }.map { norm($0.pathComponents.prefix(3).joined(separator: "/")) })
+        let ignored = Set(config.ignoredVolumes.map(norm))
         var found: [Card] = []
         for v in vols {
             guard let r = try? v.resourceValues(forKeys: Set(keys)), v.path.hasPrefix("/Volumes/") else { continue }
             let root = norm(v.pathComponents.prefix(3).joined(separator: "/"))
-            if workDisks.contains(root) || workNames.contains(norm(v.lastPathComponent)) { continue }
+            if workDisks.contains(root) || ignored.contains(norm(v.lastPathComponent)) { continue }
             if r.volumeIsRemovable == true || r.volumeIsEjectable == true || r.volumeIsInternal == false {
                 found.append(Card(url: v, name: r.volumeName ?? v.lastPathComponent, isFolder: false))
             }
@@ -170,8 +177,8 @@ final class Model: ObservableObject {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        panel.prompt = "Usar esta pasta"
-        panel.message = "Escolha a pasta (ou o cartão) com os arquivos da gravação"
+        panel.prompt = L("Usar esta pasta")
+        panel.message = L("Escolha a pasta (ou o cartão) com os arquivos da gravação")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let card = Card(url: url, name: url.lastPathComponent, isFolder: true)
         if !cards.contains(card) { cards.append(card) }
@@ -182,30 +189,29 @@ final class Model: ObservableObject {
         selectedCard = card
         files = []
         scanning = true
-        let url = card.url
+        let (url, cfg) = (card.url, config)
         Task.detached {
-            let found = CardScanner.scan(url)
+            let found = CardScanner.scan(url, cfg)
             await MainActor.run {
                 guard self.selectedCard?.url == url else { return }
-                self.kinds = Set(Kind.allCases.filter { k in k.onByDefault && found.contains { $0.kind == k } })
+                self.selected = Set(cfg.receivingFolders.filter { f in f.onByDefault && found.contains { $0.folder == f.id } }.map(\.id))
                 self.files = found
                 self.scanning = false
             }
         }
     }
 
-    func count(_ k: Kind) -> Int { files.filter { $0.kind == k }.count }
-    func bytes(_ k: Kind) -> Int64 { files.filter { $0.kind == k }.reduce(0) { $0 + $1.size } }
+    func count(_ f: Subfolder) -> Int { files.filter { $0.folder == f.id }.count }
+    func bytes(_ f: Subfolder) -> Int64 { files.filter { $0.folder == f.id }.reduce(0) { $0 + $1.size } }
 
     func refreshPlan() {
         planGeneration += 1
         let gen = planGeneration
         guard let c = selectedCapture, !files.isEmpty else { plan = nil; planning = false; return }
         planning = true
-        let (files, kinds, cfg) = (files, kinds, config)
-        let backup = alsoBackup && backupAvailable
+        let (files, selected, cfg, backups) = (files, selected, config, activeBackups)
         Task.detached(priority: .userInitiated) {
-            let p = ImportPlan.make(files: files, kinds: kinds, capture: c, cfg: cfg, backup: backup)
+            let p = ImportPlan.make(files: files, selected: selected, capture: c, cfg: cfg, backups: backups)
             await MainActor.run {
                 guard gen == self.planGeneration else { return }
                 self.plan = p
@@ -220,9 +226,9 @@ final class Model: ObservableObject {
 
     var spaceProblem: String? {
         guard let plan, plan.bytes > 0 else { return nil }
-        if freeSpace(at: config.inboxURL) < plan.bytes { return "Não há espaço suficiente no disco \(inboxDisk)." }
-        if alsoBackup && backupAvailable, let b = config.backupURL, freeSpace(at: b) < plan.bytes {
-            return "Não há espaço suficiente no disco de redundância (\(backupDisk))."
+        if freeSpace(at: config.inboxURL) < plan.bytes { return L("Não há espaço suficiente no disco {0}.", inboxDisk) }
+        for b in activeBackups where freeSpace(at: b) < plan.bytes {
+            return L("Não há espaço suficiente no disco de redundância {0}.", Volume.name(of: b))
         }
         return nil
     }
@@ -235,7 +241,7 @@ final class Model: ObservableObject {
         search = ""
     }
 
-    /// Botão Importar: se algo do cartão já estiver na Inbox, avisa antes.
+    /// Botão Importar: se algo do cartão já estiver no disco principal, avisa antes.
     func requestStart() {
         guard let plan, !planning else { return }
         if plan.duplicates.isEmpty { start() } else { showDuplicateAlert = true }
@@ -260,17 +266,17 @@ final class Model: ObservableObject {
                 NSSound(named: report.failures.isEmpty ? "Glass" : "Basso")?.play()
                 NSApp.requestUserAttention(report.failures.isEmpty ? .informationalRequest : .criticalRequest)
                 if report.failures.isEmpty {
-                    self.notify(ok ? "Backup concluído" : "Importação cancelada",
-                                "\(plan.capture): \(Fmt.files(report.verified)) copiados e conferidos" +
-                                (report.skipped > 0 ? ", \(report.skipped) já estavam lá." : "."))
+                    self.notify(ok ? L("Backup concluído") : L("Importação cancelada"),
+                                L("{0}: {1} copiados e conferidos.", plan.capture, Fmt.files(report.verified)) +
+                                (report.skipped > 0 ? " " + L("{0} já estavam lá.", report.skipped) : ""))
                 } else {
-                    self.notify("Backup com erro", "\(report.failures.count) arquivo(s) não foram copiados. Não limpe o cartão.")
+                    self.notify(L("Backup com erro"), L("{0} arquivo(s) não foram copiados. Não limpe o cartão.", report.failures.count))
                 }
             }
         }
     }
 
-    /// Tudo que pode sair do cartão: o que foi copiado agora e o que já estava na Inbox.
+    /// Tudo que pode sair do cartão: o que foi copiado agora e o que já estava no disco.
     func cleanupItems(_ report: ImportReport) -> [VerifiedCopy] {
         report.copies + report.plan.duplicates.map { VerifiedCopy(source: $0.source.url, copy: $0.existing, size: $0.source.size) }
     }
@@ -291,9 +297,10 @@ final class Model: ObservableObject {
             await MainActor.run {
                 self.phase = .cleaned(result)
                 NSSound(named: result.problems.isEmpty ? "Glass" : "Basso")?.play()
-                self.notify(result.problems.isEmpty ? "Cartão limpo" : "Limpeza com avisos",
-                            "\(result.deleted) arquivos apagados do cartão" +
-                            (result.problems.isEmpty ? "." : "; \(result.problems.count) ficaram porque não bateram com a cópia."))
+                self.notify(result.problems.isEmpty ? L("Cartão limpo") : L("Limpeza com avisos"),
+                            result.problems.isEmpty
+                                ? L("{0} arquivos apagados do cartão.", result.deleted)
+                                : L("{0} arquivos apagados do cartão; {1} ficaram porque não bateram com a cópia.", result.deleted, result.problems.count))
             }
         }
     }
@@ -353,18 +360,22 @@ final class Model: ObservableObject {
 enum Fmt {
     static func bytes(_ b: Int64) -> String { ByteCountFormatter.string(fromByteCount: b, countStyle: .file) }
     static let day: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM yyyy"; return f
+        let f = DateFormatter(); f.locale = Lang.locale; f.setLocalizedDateFormatFromTemplate("d MMM yyyy"); return f
     }()
-    static let weekday: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "EEEE"; return f
+    static let month: DateFormatter = {
+        let f = DateFormatter(); f.locale = Lang.locale; f.dateFormat = "LLL"; return f
     }()
+    /// "OUT 2026" (cabe na coluna da data)
+    static func monthYear(_ d: Date) -> String {
+        "\(month.string(from: d).trimmingCharacters(in: CharacterSet(charactersIn: "."))) \(Calendar.current.component(.year, from: d))"
+    }
     static func duration(_ s: Double) -> String {
         guard s.isFinite, s > 0 else { return "—" }
         let m = Int(s) / 60, sec = Int(s) % 60
         if m >= 60 { return "\(m / 60) h \(m % 60) min" }
         return m > 0 ? "\(m) min \(sec) s" : "\(sec) s"
     }
-    static func files(_ n: Int) -> String { n == 1 ? "1 arquivo" : "\(n) arquivos" }
+    static func files(_ n: Int) -> String { n == 1 ? L("1 arquivo") : L("{0} arquivos", n) }
 }
 
 // MARK: - Telas
@@ -388,7 +399,7 @@ struct ContentView: View {
             case .idle: EmptyView()
             case .copying: CopyingOverlay()
             case .done(let r): DoneOverlay(report: r)
-            case .cleaning: CopyingOverlay(title: "Conferindo e limpando o cartão…")
+            case .cleaning: CopyingOverlay(title: L("Conferindo e limpando o cartão…"))
             case .cleaned(let r): CleanedOverlay(report: r)
             }
         }
@@ -396,8 +407,8 @@ struct ContentView: View {
         .background(.background)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { model.showSetup = true } label: { Label("Ajustes", systemImage: "gearshape") }
-                    .help("Discos, pastas e padrões de nome")
+                Button { model.showSetup = true } label: { Label(L("Ajustes"), systemImage: "gearshape") }
+                    .help(L("Discos, pastas e padrões de nome"))
                     .disabled(isBusy)
             }
         }
@@ -434,13 +445,13 @@ struct CardColumn: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StepHeader(number: 1, title: "Cartão")
+            StepHeader(number: 1, title: L("Cartão"))
             ScrollView {
                 VStack(spacing: 8) {
                     if model.cards.isEmpty {
                         VStack(spacing: 10) {
                             Image(systemName: "sdcard").font(.system(size: 34)).foregroundStyle(.tertiary)
-                            Text("Coloque o cartão no leitor").foregroundStyle(.secondary)
+                            Text(L("Coloque o cartão no leitor")).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 40)
@@ -450,7 +461,7 @@ struct CardColumn: View {
                             .onTapGesture { model.select(card: card) }
                             .contextMenu {
                                 if !card.isFolder {
-                                    Button("Não mostrar este disco") { model.hide(card: card) }
+                                    Button(L("Não mostrar este disco")) { model.hide(card: card) }
                                 }
                             }
                     }
@@ -464,7 +475,7 @@ struct CardColumn: View {
             Button {
                 model.chooseFolder()
             } label: {
-                Label("Escolher outra pasta…", systemImage: "folder")
+                Label(L("Escolher outra pasta…"), systemImage: "folder")
             }
             .buttonStyle(.link)
             .padding(.horizontal, 20)
@@ -485,7 +496,7 @@ struct CardRow: View {
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(card.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                Text(card.isFolder ? card.url.deletingLastPathComponent().path : "Cartão de memória")
+                Text(card.isFolder ? card.url.deletingLastPathComponent().path : L("Cartão de memória"))
                     .font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
                     .foregroundStyle(selected ? .white.opacity(0.8) : .secondary)
             }
@@ -502,32 +513,33 @@ struct CardSummary: View {
     @EnvironmentObject var model: Model
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("NO CARTÃO").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            Text(L("NO CARTÃO")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
             if model.scanning {
-                HStack { ProgressView().controlSize(.small); Text("Lendo o cartão…").foregroundStyle(.secondary) }
+                HStack { ProgressView().controlSize(.small); Text(L("Lendo o cartão…")).foregroundStyle(.secondary) }
             } else {
-                // Todos os tipos aparecem, para ficar claro o que o app consegue importar.
-                ForEach(Kind.allCases) { k in
-                    let n = model.count(k)
+                // Todas as subpastas que recebem arquivos aparecem, para ficar claro o que o app importa.
+                ForEach(model.config.receivingFolders) { f in
+                    let n = model.count(f)
                     HStack(alignment: .firstTextBaseline) {
-                        Image(systemName: k.symbol).frame(width: 20).foregroundStyle(.secondary)
+                        Image(systemName: f.symbol).frame(width: 20).foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(k.title)
-                            Text(n > 0 ? k.label(n) : "nenhum").font(.caption).foregroundStyle(.secondary)
+                            Text(f.trimmedPath)
+                            Text(n > 0 ? Fmt.files(n) : L("nenhum") + " · " + f.extensionsLabel)
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer()
-                        if n > 0 { Text(Fmt.bytes(model.bytes(k))).foregroundStyle(.secondary).monospacedDigit() }
+                        if n > 0 { Text(Fmt.bytes(model.bytes(f))).foregroundStyle(.secondary).monospacedDigit() }
                     }
                     .font(.callout)
                     .opacity(n > 0 ? 1 : 0.45)
                 }
                 if model.files.isEmpty {
-                    Text("Nada para importar neste cartão.").foregroundStyle(.secondary).font(.caption)
+                    Text(L("Nada para importar neste cartão.")).foregroundStyle(.secondary).font(.caption)
                 }
                 if let first = model.files.map(\.date).min(), let last = model.files.map(\.date).max() {
                     Text(Fmt.day.string(from: first) == Fmt.day.string(from: last)
-                         ? "Gravado em \(Fmt.day.string(from: first))"
-                         : "De \(Fmt.day.string(from: first)) a \(Fmt.day.string(from: last))")
+                         ? L("Gravado em {0}", Fmt.day.string(from: first))
+                         : L("De {0} a {1}", Fmt.day.string(from: first), Fmt.day.string(from: last)))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -546,11 +558,11 @@ struct CaptureColumn: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                StepHeader(number: 2, title: "Captação")
+                StepHeader(number: 2, title: L("Captação"))
                 Button {
                     showingNew = true
                 } label: {
-                    Label("Nova captação", systemImage: "plus")
+                    Label(L("Nova captação"), systemImage: "plus")
                 }
                 .controlSize(.large)
                 .disabled(!model.inboxAvailable)
@@ -561,10 +573,10 @@ struct CaptureColumn: View {
                 VStack(spacing: 10) {
                     Image(systemName: "externaldrive.badge.exclamationmark").font(.system(size: 34)).foregroundStyle(.tertiary)
                     if model.config.inbox.isEmpty {
-                        Text("Escolha onde guardar as captações").font(.headline)
-                        Button("Abrir Ajustes…") { model.showSetup = true }
+                        Text(L("Escolha onde guardar as captações")).font(.headline)
+                        Button(L("Abrir Ajustes…")) { model.showSetup = true }
                     } else {
-                        Text("Conecte o disco \(model.inboxDisk)").font(.headline)
+                        Text(L("Conecte o disco {0}", model.inboxDisk)).font(.headline)
                         Text(model.config.inbox).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -572,7 +584,7 @@ struct CaptureColumn: View {
             } else {
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Buscar captação", text: $model.search).textFieldStyle(.plain)
+                    TextField(L("Buscar captação"), text: $model.search).textFieldStyle(.plain)
                     if !model.search.isEmpty {
                         Button { model.search = "" } label: { Image(systemName: "xmark.circle.fill") }
                             .buttonStyle(.plain).foregroundStyle(.secondary)
@@ -609,7 +621,7 @@ struct CaptureRow: View {
             VStack(spacing: 0) {
                 if let d = capture.date {
                     Text(d.formatted(.dateTime.day())).font(.system(size: 18, weight: .bold, design: .rounded))
-                    Text(Fmt.day.string(from: d).split(separator: " ").dropFirst().joined(separator: " "))
+                    Text(Fmt.monthYear(d))
                         .font(.system(size: 9, weight: .medium)).textCase(.uppercase).foregroundStyle(.secondary)
                 } else {
                     Image(systemName: "folder").font(.system(size: 16)).foregroundStyle(.secondary)
@@ -636,36 +648,38 @@ struct NewCaptureSheet: View {
     @FocusState private var nameFocused: Bool
 
     var trimmed: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
-    var invalid: Bool { trimmed.isEmpty || trimmed.contains("/") || trimmed.contains(":") || folderName.isEmpty }
     var folderName: String { Capture.folderName(model.config, date: date, title: trimmed) }
+    var invalid: Bool { trimmed.isEmpty || trimmed.contains("/") || trimmed.contains(":") || folderName.isEmpty }
     var exists: Bool { model.captures.contains { $0.name == folderName } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Nova captação").font(.title2.bold())
+            Text(L("Nova captação")).font(.title2.bold())
             Form {
-                TextField("Nome", text: $title, prompt: Text("ex.: CASAMENTO ANA E JOÃO"))
+                TextField(L("Nome"), text: $title, prompt: Text(L("ex.: CASAMENTO ANA E JOÃO")))
                     .focused($nameFocused)
                     .onSubmit(create)
-                DatePicker("Data da gravação", selection: $date, displayedComponents: .date)
+                DatePicker(L("Data da gravação"), selection: $date, displayedComponents: .date)
             }
             .formStyle(.grouped)
             .scrollDisabled(true)
             .frame(height: 130)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("VAI CRIAR").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                Text(L("VAI CRIAR")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                 Label(Capture.folderName(model.config, date: date, title: trimmed.isEmpty ? "…" : trimmed), systemImage: "folder.fill")
                     .font(.system(size: 14, weight: .semibold))
-                Text("com " + ListFormatter.localizedString(byJoining: model.config.captureFolders))
-                    .font(.caption).foregroundStyle(.secondary)
+                if !model.config.captureFolders.isEmpty {
+                    Text(L("com {0}", ListFormatter.localizedString(byJoining: model.config.captureFolders)))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
-            if exists { Text("Essa pasta já existe; ela só vai ser selecionada.").font(.caption).foregroundStyle(.orange) }
+            if exists { Text(L("Essa pasta já existe; ela só vai ser selecionada.")).font(.caption).foregroundStyle(.orange) }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
                 Spacer()
-                Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(exists ? "Selecionar" : "Criar pasta", action: create)
+                Button(L("Cancelar")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(exists ? L("Selecionar") : L("Criar pasta"), action: create)
                     .keyboardShortcut(.defaultAction)
                     .disabled(invalid)
             }
@@ -692,53 +706,62 @@ struct ImportColumn: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StepHeader(number: 3, title: "Importar")
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("O QUE IMPORTAR").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                    ForEach(Kind.allCases) { k in
-                        let n = model.count(k)
-                        Toggle(isOn: Binding(
-                            get: { model.kinds.contains(k) },
-                            set: { on in if on { model.kinds.insert(k) } else { model.kinds.remove(k) } })
-                        ) {
-                            HStack {
-                                Label(k.title, systemImage: k.symbol)
-                                Spacer()
-                                Text(n == 0 ? "nenhum" : "\(n)").foregroundStyle(.secondary).monospacedDigit()
+            StepHeader(number: 3, title: L("Importar"))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L("O QUE IMPORTAR")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        ForEach(model.config.receivingFolders) { f in
+                            let n = model.count(f)
+                            Toggle(isOn: Binding(
+                                get: { model.selected.contains(f.id) },
+                                set: { on in if on { model.selected.insert(f.id) } else { model.selected.remove(f.id) } })
+                            ) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Image(systemName: f.symbol).frame(width: 18).foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(f.trimmedPath)
+                                        Text(f.extensionsLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                    Spacer()
+                                    Text(n == 0 ? L("nenhum") : "\(n)").foregroundStyle(.secondary).monospacedDigit()
+                                }
                             }
+                            .toggleStyle(.checkbox)
+                            .disabled(n == 0)
                         }
-                        .toggleStyle(.checkbox)
-                        .disabled(n == 0)
                     }
-                }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    if let b = model.config.backupURL {
-                        Toggle(isOn: $model.alsoBackup) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Também copiar para a redundância")
-                                Text("\(model.backupDisk) · \(b.lastPathComponent), mesma pasta e mesmos nomes")
-                                    .font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L("REDUNDÂNCIA")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        ForEach(model.config.backupURLs, id: \.self) { b in
+                            let connected = model.isConnected(b)
+                            Toggle(isOn: Binding(
+                                get: { connected && !model.backupsOff.contains(b.path) },
+                                set: { on in if on { model.backupsOff.remove(b.path) } else { model.backupsOff.insert(b.path) } })
+                            ) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(L("Também copiar para {0}", Volume.name(of: b)))
+                                    Text(connected ? L("{0}, mesma pasta e mesmos nomes", b.lastPathComponent) : L("Disco não conectado: a cópia fica de fora."))
+                                        .font(.caption).foregroundStyle(connected ? Color.secondary : Color.orange)
+                                }
                             }
+                            .toggleStyle(.checkbox)
+                            .disabled(!connected)
                         }
-                        .toggleStyle(.checkbox)
-                        .disabled(!model.backupAvailable)
-                        if model.alsoBackup && !model.backupAvailable {
-                            Text("Disco \(model.backupDisk) não conectado: a cópia de redundância fica de fora.").font(.caption).foregroundStyle(.orange)
-                        }
-                    } else {
-                        Button("Configurar um disco de redundância…") { model.showSetup = true }
+                        Button(model.config.backups.isEmpty ? L("Adicionar um disco de redundância…") : L("Editar discos…")) { model.showSetup = true }
                             .buttonStyle(.link).font(.callout)
                     }
+
+                    Divider()
+
+                    PlanPreview()
                 }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+            }
 
-                Divider()
-
-                PlanPreview()
-
-                Spacer(minLength: 0)
-
+            VStack(alignment: .leading, spacing: 12) {
                 if let problem = model.spaceProblem {
                     Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
                 }
@@ -761,16 +784,16 @@ struct ImportColumn: View {
                 .disabled(plan == nil || model.planning || (plan!.jobs.isEmpty && plan!.duplicates.isEmpty) || model.spaceProblem != nil)
                 .alert(duplicateTitle(plan), isPresented: $model.showDuplicateAlert) {
                     if let plan, !plan.jobs.isEmpty {
-                        Button("Importar só os novos (\(plan.jobs.count))") { model.start() }
+                        Button(L("Importar só os novos ({0})", plan.jobs.count)) { model.start() }
                     } else {
-                        Button("Continuar") { model.start() }
+                        Button(L("Continuar")) { model.start() }
                     }
-                    Button("Cancelar", role: .cancel) {}
+                    Button(L("Cancelar"), role: .cancel) {}
                 } message: {
                     Text(duplicateMessage(plan))
                 }
 
-                Text("Nada é sobrescrito. Cada arquivo é relido depois da cópia e comparado com o original. O cartão só é limpo se você pedir, no fim.")
+                Text(L("Nada é sobrescrito. Cada arquivo é relido depois da cópia e comparado com o original. O cartão só é limpo se você pedir, no fim."))
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -783,29 +806,29 @@ struct ImportColumn: View {
     func duplicateTitle(_ plan: ImportPlan?) -> String {
         guard let plan else { return "" }
         let n = plan.duplicates.count
-        if plan.jobs.isEmpty { return "Tudo deste cartão já foi importado" }
-        return n == 1 ? "1 arquivo deste cartão já foi importado" : "\(n) arquivos deste cartão já foram importados"
+        if plan.jobs.isEmpty { return L("Tudo deste cartão já foi importado") }
+        return n == 1 ? L("1 arquivo deste cartão já foi importado") : L("{0} arquivos deste cartão já foram importados", n)
     }
 
     func duplicateMessage(_ plan: ImportPlan?) -> String {
         guard let plan else { return "" }
         var lines: [String] = []
-        if !plan.alreadyHere.isEmpty { lines.append("\(Fmt.files(plan.alreadyHere.count)) já \(plan.alreadyHere.count == 1 ? "está" : "estão") em \(plan.capture).") }
+        if !plan.alreadyHere.isEmpty { lines.append(L("{0} já em {1}.", Fmt.files(plan.alreadyHere.count), plan.capture)) }
         for (capture, group) in Dictionary(grouping: plan.elsewhere, by: \.capture).sorted(by: { $0.key > $1.key }) {
-            lines.append("\(Fmt.files(group.count)) já \(group.count == 1 ? "está" : "estão") em OUTRA captação: \(capture).")
+            lines.append(L("{0} já em OUTRA captação: {1}.", Fmt.files(group.count), capture))
         }
         let examples = plan.duplicates.prefix(3).map { "\($0.source.url.lastPathComponent) = \($0.existing.lastPathComponent)" }
-        lines.append("\nEx.: " + examples.joined(separator: "\n") + (plan.duplicates.count > 3 ? "\n…" : ""))
-        lines.append("\nEsses arquivos NÃO vão ser copiados de novo nem sobrescritos." +
-                     (plan.jobs.isEmpty ? "" : " Os outros \(plan.jobs.count) vão ser importados normalmente."))
+        lines.append("\n" + L("Ex.:") + " " + examples.joined(separator: "\n") + (plan.duplicates.count > 3 ? "\n…" : ""))
+        lines.append("\n" + L("Esses arquivos NÃO vão ser copiados de novo nem sobrescritos.") +
+                     (plan.jobs.isEmpty ? "" : " " + L("Os outros {0} vão ser importados normalmente.", plan.jobs.count)))
         return lines.joined(separator: "\n")
     }
 
     func buttonTitle(_ plan: ImportPlan?) -> String {
-        if model.planning { return "Comparando com a Inbox…" }
-        guard let plan else { return "Importar" }
-        if plan.jobs.isEmpty { return plan.duplicates.isEmpty ? "Nada para importar" : "Tudo já importado · ver opções" }
-        return "Importar \(Fmt.files(plan.jobs.count)) · \(Fmt.bytes(plan.bytes))"
+        if model.planning { return L("Comparando com o que já foi importado…") }
+        guard let plan else { return L("Importar") }
+        if plan.jobs.isEmpty { return plan.duplicates.isEmpty ? L("Nada para importar") : L("Tudo já importado · ver opções") }
+        return L("Importar {0} · {1}", Fmt.files(plan.jobs.count), Fmt.bytes(plan.bytes))
     }
 }
 
@@ -813,17 +836,17 @@ struct PlanPreview: View {
     @EnvironmentObject var model: Model
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("DESTINO").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            Text(L("DESTINO")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
             if let c = model.selectedCapture {
                 Text(c.name).font(.system(size: 14, weight: .semibold)).lineLimit(2)
                 if model.planning {
-                    HStack { ProgressView().controlSize(.small); Text("Comparando o cartão com o que já está na Inbox…").font(.caption).foregroundStyle(.secondary) }
+                    HStack { ProgressView().controlSize(.small); Text(L("Comparando o cartão com o que já foi importado…")).font(.caption).foregroundStyle(.secondary) }
                 } else if let plan = model.plan {
-                    ForEach(Kind.allCases.filter { model.kinds.contains($0) }) { k in
-                        let jobs = plan.jobs.filter { $0.source.kind == k }
+                    ForEach(model.config.receivingFolders.filter { model.selected.contains($0.id) }) { f in
+                        let jobs = plan.jobs.filter { $0.source.folder == f.id }
                         if let first = jobs.first {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text("\(model.config.subpath(k)) · \(k.label(jobs.count))").font(.caption.weight(.semibold))
+                                Text("\(f.trimmedPath) · \(Fmt.files(jobs.count))").font(.caption.weight(.semibold))
                                 Text(jobs.count == 1 ? first.name : "\(first.name)  …  \(jobs.last!.name)")
                                     .font(.caption.monospaced()).foregroundStyle(.secondary)
                                     .lineLimit(2)
@@ -832,26 +855,26 @@ struct PlanPreview: View {
                     }
                     if !plan.duplicates.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Label("\(Fmt.files(plan.duplicates.count)) do cartão já \(plan.duplicates.count == 1 ? "foi importado" : "foram importados")",
+                            Label(plan.duplicates.count == 1 ? L("1 arquivo do cartão já foi importado") : L("{0} arquivos do cartão já foram importados", plan.duplicates.count),
                                   systemImage: "exclamationmark.triangle.fill")
                                 .font(.callout.weight(.semibold)).foregroundStyle(.orange)
                             if !plan.alreadyHere.isEmpty {
-                                Text("\(plan.alreadyHere.count) nesta pasta").font(.caption)
+                                Text(L("{0} nesta pasta", plan.alreadyHere.count)).font(.caption)
                             }
                             ForEach(Array(Set(plan.elsewhere.map(\.capture))).sorted(by: >), id: \.self) { c in
-                                Text("\(plan.elsewhere.filter { $0.capture == c }.count) em outra captação: \(c)").font(.caption)
+                                Text(L("{0} em outra captação: {1}", plan.elsewhere.filter { $0.capture == c }.count, c)).font(.caption)
                             }
-                            Text("Não vão ser copiados de novo nem sobrescritos.").font(.caption).foregroundStyle(.secondary)
+                            Text(L("Não vão ser copiados de novo nem sobrescritos.")).font(.caption).foregroundStyle(.secondary)
                         }
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
                     }
                 } else if model.selectedCard == nil {
-                    Text("Escolha o cartão.").font(.callout).foregroundStyle(.secondary)
+                    Text(L("Escolha o cartão.")).font(.callout).foregroundStyle(.secondary)
                 }
             } else {
-                Text("Escolha uma captação na lista ou crie uma nova.").font(.callout).foregroundStyle(.secondary)
+                Text(L("Escolha uma captação na lista ou crie uma nova.")).font(.callout).foregroundStyle(.secondary)
             }
         }
     }
@@ -876,7 +899,7 @@ struct OverlayCard<Content: View>: View {
 
 struct CopyingOverlay: View {
     @EnvironmentObject var model: Model
-    var title = "Fazendo o backup…"
+    var title = L("Fazendo o backup…")
     var body: some View {
         OverlayCard {
             VStack(alignment: .leading, spacing: 16) {
@@ -894,9 +917,9 @@ struct CopyingOverlay: View {
                     Text("\(Int(fraction * 100))%").font(.system(size: 28, weight: .bold, design: .rounded)).monospacedDigit()
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        if let p { Text("Arquivo \(min(p.fileIndex + 1, p.fileCount)) de \(p.fileCount)").monospacedDigit() }
+                        if let p { Text(L("Arquivo {0} de {1}", min(p.fileIndex + 1, p.fileCount), p.fileCount)).monospacedDigit() }
                         if model.speed > 0, let p {
-                            Text("\(Fmt.bytes(Int64(model.speed)))/s · faltam \(Fmt.duration(Double(p.total - p.done) / model.speed))")
+                            Text(L("{0}/s · faltam {1}", Fmt.bytes(Int64(model.speed)), Fmt.duration(Double(p.total - p.done) / model.speed)))
                                 .foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
@@ -907,7 +930,7 @@ struct CopyingOverlay: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Cancelar", role: .cancel) { model.cancel() }.keyboardShortcut(.cancelAction)
+                    Button(L("Cancelar"), role: .cancel) { model.cancel() }.keyboardShortcut(.cancelAction)
                 }
             }
         }
@@ -932,31 +955,31 @@ struct DoneOverlay: View {
                         .font(.system(size: 40))
                         .foregroundStyle(ok ? .green : (report.cancelled ? .orange : .red))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(ok ? "Backup concluído" : (report.cancelled ? "Importação cancelada" : "Terminou com erros"))
+                        Text(ok ? L("Backup concluído") : (report.cancelled ? L("Importação cancelada") : L("Terminou com erros")))
                             .font(.title2.bold())
                         Text(model.selectedCapture?.name ?? "").foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Kind.allCases) { k in
-                        if let n = report.copied[k], n > 0 {
-                            Label("\(k.label(n)) \(k == .fotos ? "copiada" : "copiado")\(n == 1 ? "" : "s")", systemImage: k.symbol)
+                    ForEach(model.config.receivingFolders) { f in
+                        if let n = report.copied[f.id], n > 0 {
+                            Label(L("{0} em {1}", Fmt.files(n), f.trimmedPath), systemImage: f.symbol)
                         }
                     }
                     if report.verified > 0 {
-                        Label("\(report.verified) conferidos byte a byte com o original", systemImage: "checkmark.shield")
+                        Label(L("{0} conferidos byte a byte com o original", report.verified), systemImage: "checkmark.shield")
                     }
                     if report.skipped > 0 {
-                        Label("\(Fmt.files(report.skipped)) já tinham sido importados (não copiados de novo)", systemImage: "arrow.uturn.forward")
+                        Label(L("{0} já tinham sido importados (não copiados de novo)", Fmt.files(report.skipped)), systemImage: "arrow.uturn.forward")
                     }
-                    Label("\(Fmt.bytes(report.bytes)) em \(Fmt.duration(report.seconds))", systemImage: "clock")
+                    Label(L("{0} em {1}", Fmt.bytes(report.bytes), Fmt.duration(report.seconds)), systemImage: "clock")
                         .foregroundStyle(.secondary)
                 }
                 .font(.callout)
 
                 if !report.failures.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("\(report.failures.count) com problema. Não formate nem limpe o cartão antes de resolver:")
+                        Text(L("{0} com problema. Não formate nem limpe o cartão antes de resolver:", report.failures.count))
                             .font(.callout.weight(.semibold)).foregroundStyle(.red)
                         ScrollView {
                             VStack(alignment: .leading, spacing: 2) {
@@ -968,7 +991,7 @@ struct DoneOverlay: View {
                     }
                 }
                 if report.cancelled {
-                    Text("Os arquivos que terminaram ficaram na pasta. Importar de novo continua de onde parou.")
+                    Text(L("Os arquivos que terminaram ficaram na pasta. Importar de novo continua de onde parou."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -978,33 +1001,33 @@ struct DoneOverlay: View {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "sdcard").font(.system(size: 22)).foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Limpar o cartão").font(.callout.weight(.semibold))
-                            Text("Apaga do cartão \(Fmt.files(items.count)) (\(Fmt.bytes(bytes))) que já estão no destino. Antes, cada um é relido inteiro e comparado de novo com a cópia; o que não bater fica no cartão.")
+                            Text(L("Limpar o cartão")).font(.callout.weight(.semibold))
+                            Text(L("Apaga do cartão {0} ({1}) que já estão no disco principal. Antes, cada um é relido inteiro e comparado de novo com a cópia; o que não bater fica no cartão.", Fmt.files(items.count), Fmt.bytes(bytes)))
                                 .font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer()
-                        Button("Limpar cartão…", role: .destructive) { model.showCleanConfirm = true }
+                        Button(L("Limpar cartão…"), role: .destructive) { model.showCleanConfirm = true }
                             .tint(.red)
                     }
                     .padding(12)
                     .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
-                    .confirmationDialog("Apagar \(Fmt.files(items.count)) do cartão \(model.selectedCard?.name ?? "")?",
+                    .confirmationDialog(L("Apagar {0} do cartão {1}?", Fmt.files(items.count), model.selectedCard?.name ?? ""),
                                         isPresented: $model.showCleanConfirm) {
-                        Button("Conferir e apagar", role: .destructive) { model.cleanCard() }
-                        Button("Cancelar", role: .cancel) {}
+                        Button(L("Conferir e apagar"), role: .destructive) { model.cleanCard() }
+                        Button(L("Cancelar"), role: .cancel) {}
                     } message: {
-                        Text("Só são apagados os arquivos que baterem byte a byte com a cópia em \(model.selectedCapture?.name ?? "Inbox"). Isso não pode ser desfeito.")
+                        Text(L("Só são apagados os arquivos que baterem byte a byte com a cópia em {0}. Isso não pode ser desfeito.", model.selectedCapture?.name ?? ""))
                     }
                 }
 
                 HStack {
-                    Button("Mostrar no Finder") { model.revealCapture() }
+                    Button(L("Mostrar no Finder")) { model.revealCapture() }
                     Spacer()
                     if ok, let card = model.selectedCard, !card.isFolder {
-                        Button("Ejetar cartão") { model.eject() }
+                        Button(L("Ejetar cartão")) { model.eject() }
                     }
-                    Button("Concluir") { model.finish() }
+                    Button(L("Concluir")) { model.finish() }
                         .keyboardShortcut(.defaultAction)
                         .buttonStyle(.borderedProminent)
                 }
@@ -1027,15 +1050,15 @@ struct CleanedOverlay: View {
                         .font(.system(size: 36))
                         .foregroundStyle(ok ? .green : .orange)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(ok ? "Cartão limpo" : (report.cancelled ? "Limpeza interrompida" : "Limpeza com avisos"))
+                        Text(ok ? L("Cartão limpo") : (report.cancelled ? L("Limpeza interrompida") : L("Limpeza com avisos")))
                             .font(.title2.bold())
                         Text(model.selectedCard?.name ?? "").foregroundStyle(.secondary)
                     }
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("\(Fmt.files(report.deleted)) conferidos e apagados (\(Fmt.bytes(report.bytes)))", systemImage: "checkmark.shield")
+                    Label(L("{0} conferidos e apagados ({1})", Fmt.files(report.deleted), Fmt.bytes(report.bytes)), systemImage: "checkmark.shield")
                     if report.leftovers > 0 {
-                        Label("\(Fmt.files(report.leftovers)) que não eram da importação ficaram no cartão (JPG, proxies, arquivos da câmera). Para zerar, formate o cartão na câmera.",
+                        Label(L("{0} que não eram da importação ficaram no cartão (JPG, proxies, arquivos da câmera). Para zerar, formate o cartão na câmera.", Fmt.files(report.leftovers)),
                               systemImage: "info.circle")
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1044,7 +1067,7 @@ struct CleanedOverlay: View {
                 .font(.callout)
                 if !report.problems.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("\(report.problems.count) não foram apagados porque a conferência falhou:")
+                        Text(L("{0} não foram apagados porque a conferência falhou:", report.problems.count))
                             .font(.callout.weight(.semibold)).foregroundStyle(.red)
                         ScrollView {
                             VStack(alignment: .leading, spacing: 2) {
@@ -1057,8 +1080,8 @@ struct CleanedOverlay: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Ejetar cartão") { model.eject() }
-                    Button("Concluir") { model.finish() }
+                    Button(L("Ejetar cartão")) { model.eject() }
+                    Button(L("Concluir")) { model.finish() }
                         .keyboardShortcut(.defaultAction)
                         .buttonStyle(.borderedProminent)
                 }
