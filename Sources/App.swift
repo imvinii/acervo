@@ -7,6 +7,7 @@ import UserNotifications
 
 @main
 struct ImportarCartaoApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = Model()
     var body: some Scene {
         Window("Importar Cartão", id: "main") {
@@ -21,6 +22,23 @@ struct ImportarCartaoApp: App {
                 Button("Ajustes…") { model.showSetup = true }.keyboardShortcut(",")
             }
         }
+    }
+}
+
+/// O app é uma janela só: fechar a janela encerra o app (antes ele ficava aberto, sem janela).
+/// Durante uma cópia ou limpeza, pede confirmação antes de sair.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard Model.isWorking else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "Há uma cópia em andamento"
+        alert.informativeText = "Se sair agora, ela é interrompida. O que já foi copiado e conferido fica salvo; importar de novo continua de onde parou."
+        alert.addButton(withTitle: "Continuar a cópia")
+        alert.addButton(withTitle: "Sair mesmo assim")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateCancel : .terminateNow
     }
 }
 
@@ -66,7 +84,12 @@ final class Model: ObservableObject {
     @Published var showCleanConfirm = false
 
     enum Phase { case idle, copying, done(ImportReport), cleaning(ImportReport), cleaned(Copier.CleanupReport) }
-    @Published var phase: Phase = .idle
+    @Published var phase: Phase = .idle {
+        didSet {
+            switch phase { case .copying, .cleaning: Model.isWorking = true; default: Model.isWorking = false }
+        }
+    }
+    static var isWorking = false
     @Published var progress: Copier.Progress?
     @Published var speed: Double = 0          // bytes/s
     private var copier: Copier?
