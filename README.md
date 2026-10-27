@@ -12,6 +12,10 @@ Na primeira abertura, o macOS avisa que não pode verificar o desenvolvedor (o a
 
 Requer macOS 14 ou mais novo, em Mac com Apple Silicon ou Intel. Em português, inglês e espanhol, seguindo o idioma do sistema.
 
+### Windows (beta)
+
+Também há uma versão para **Windows 10 e 11 (64 bits)**, com as mesmas funções: baixe o `Acervo-…-Windows-beta.zip` em Releases, descompacte e abra o `Acervo.exe` (não precisa instalar). Na primeira vez, o Windows pode avisar que protegeu o computador: clique em **Mais informações > Executar assim mesmo**. É uma versão de testes, ainda não testada num PC com Windows: experimente primeiro com um cartão que já tenha backup e conte em **Issues** se algo der errado.
+
 ## O que ele faz
 
 - Detecta os cartões sozinho (ou usa uma pasta escolhida à mão) e copia **vários cartões ao mesmo tempo**, um por leitor, para a mesma captação, com a numeração na ordem de gravação de todas as câmeras ou separando cada cartão numa subpasta.
@@ -40,11 +44,17 @@ Etiquetas: `{PASTA}` nome da pasta da captação · `{NOME}` só o nome · `{AAA
 
 ## Compilar
 
-Precisa das ferramentas de linha de comando do Xcode (`xcode-select --install`).
+**Mac** (Swift, pasta `Sources`): precisa das ferramentas de linha de comando do Xcode (`xcode-select --install`).
 
 ```bash
 ./build.sh      # gera build/Acervo.app
 ./release.sh    # gera dist/Acervo-<versão>.dmg para compartilhar
+```
+
+**Windows** (C# com Avalonia, pasta `windows`): precisa do [.NET 10](https://dot.net). Dá para gerar no Mac ou no Windows.
+
+```bash
+windows/build-windows.sh   # gera dist/Acervo-<versão>-Windows-beta.zip
 ```
 
 ---
@@ -57,7 +67,7 @@ A macOS app that backs up memory cards after a shoot: it creates the shoot folde
 
 On first launch you choose the main drive, optional redundancy drives, the folder and subfolder structure (and which file types each subfolder gets) and how files are named. Tags: `{FOLDER}` `{NAME}` `{YYYY}` `{YY}` `{MM}` `{DD}` `{NNN}` `{ORIGINAL}`.
 
-Requires macOS 14 or later (Apple Silicon or Intel). Available in English, Portuguese and Spanish, following the system language.
+Requires macOS 14 or later (Apple Silicon or Intel). A **Windows 10/11 beta** (`Acervo-…-Windows-beta.zip`, just unzip and run `Acervo.exe`) is also available; it hasn't been tested on a real Windows PC yet. Available in English, Portuguese and Spanish, following the system language.
 
 ## Español
 
@@ -67,4 +77,4 @@ App para macOS que hace la copia de seguridad de las tarjetas de memoria despué
 
 En el primer uso eliges el disco principal, los discos de redundancia (opcional), la estructura de carpetas y subcarpetas (y qué tipos de archivo recibe cada una) y cómo se nombran los archivos. Etiquetas: `{CARPETA}` `{NOMBRE}` `{AAAA}` `{AA}` `{MM}` `{DD}` `{NNN}` `{ORIGINAL}`.
 
-Requiere macOS 14 o posterior (Apple Silicon o Intel). Disponible en español, portugués e inglés, según el idioma del sistema.
+Requiere macOS 14 o posterior (Apple Silicon o Intel). También hay una **versión beta para Windows 10/11** (`Acervo-…-Windows-beta.zip`: descomprime y abre `Acervo.exe`), aún no probada en un PC con Windows. Disponible en español, portugués e inglés, según el idioma del sistema.

@@ -1,0 +1,74 @@
+ACERVO PARA WINDOWS (VERSÃO DE TESTES / BETA)
+Português · English · Español
+
+======================================================================
+PORTUGUÊS
+======================================================================
+Backup dos cartões de memória depois de uma gravação, com conferência
+de cada arquivo e cópia de redundância em outros discos.
+
+ATENÇÃO: esta é a primeira versão para Windows e ainda não foi testada num
+PC com Windows. Antes de confiar nela para um trabalho, faça um teste com
+um cartão que já tenha backup. Se algo der errado, conte na página do
+projeto no GitHub (Issues).
+
+USAR
+1. Descompacte a pasta "Acervo" onde quiser (ex.: Documentos).
+2. Abra o Acervo.exe. Não precisa instalar.
+3. Na primeira vez, o Windows pode mostrar "O Windows protegeu o computador"
+   (o app não é assinado). Clique em "Mais informações" e depois em
+   "Executar assim mesmo".
+4. Na primeira abertura, escolha o disco principal, os discos de
+   redundância (opcional), as pastas e os nomes. Dá para mudar depois em
+   Ajustes.
+5. Coloque o cartão, escolha a captação e clique em Importar.
+Cada arquivo é relido depois da cópia e comparado com o original. Nada é
+sobrescrito, e o cartão só é limpo se você pedir, no fim.
+
+======================================================================
+ENGLISH
+======================================================================
+Backs up memory cards after a shoot, verifying every file and making
+redundant copies on other drives.
+
+NOTE: this is the first Windows version and it hasn't been tested on a
+Windows PC yet. Before relying on it for real work, try it with a card
+that is already backed up. If something goes wrong, please report it on
+the project's GitHub page (Issues).
+
+USE
+1. Unzip the "Acervo" folder anywhere (e.g. Documents).
+2. Open Acervo.exe. No installation needed.
+3. The first time, Windows may show "Windows protected your PC" (the app
+   isn't signed). Click "More info" and then "Run anyway".
+4. On first launch, choose the main drive, redundancy drives (optional),
+   folders and file names. You can change them later in Settings.
+5. Insert the card, choose the shoot and click Import.
+Every file is read back after copying and compared with the original.
+Nothing is overwritten, and the card is only erased if you ask, at the end.
+
+======================================================================
+ESPAÑOL
+======================================================================
+Copia de seguridad de las tarjetas de memoria después de un rodaje,
+verificando cada archivo y con copias de redundancia en otros discos.
+
+ATENCIÓN: es la primera versión para Windows y todavía no se probó en un
+PC con Windows. Antes de usarla en un trabajo, pruébala con una tarjeta
+que ya tenga copia. Si algo falla, cuéntalo en la página del proyecto en
+GitHub (Issues).
+
+USAR
+1. Descomprime la carpeta "Acervo" donde quieras (ej.: Documentos).
+2. Abre Acervo.exe. No hace falta instalar.
+3. La primera vez, Windows puede mostrar "Windows protegió su PC" (la app
+   no está firmada). Haz clic en "Más información" y luego en
+   "Ejecutar de todas formas".
+4. En el primer uso, elige el disco principal, los discos de redundancia
+   (opcional), las carpetas y los nombres. Puedes cambiarlo en Ajustes.
+5. Inserta la tarjeta, elige el rodaje y haz clic en Importar.
+Cada archivo se vuelve a leer tras copiarlo y se compara con el original.
+No se sobrescribe nada, y la tarjeta solo se borra si lo pides, al final.
+
+----------------------------------------------------------------------
+Windows 10 ou 11, 64 bits · Windows 10 or 11, 64-bit · Windows 10 u 11, 64 bits
