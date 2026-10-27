@@ -57,6 +57,10 @@ Etiquetas: `{PASTA}` nome da pasta da captação · `{NOME}` só o nome · `{AAA
 windows/build-windows.sh   # gera dist/Acervo-<versão>-Windows-beta.zip
 ```
 
+## Licença
+
+[MIT](LICENSE): pode usar, modificar e redistribuir à vontade, mantendo o aviso de autoria.
+
 ---
 
 ## English
