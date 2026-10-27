@@ -164,11 +164,10 @@ struct SetupView: View {
             }
             .padding(.vertical, 2)
 
-            ForEach($draft.folders) { $f in
-                SubfolderRow(folder: $f) {
-                    draft.folders.removeAll { $0.id == f.id }
-                    draft.rules.removeAll { $0.folder == f.id }
-                }
+            // Cada linha acessa a subpasta pelo id (não pela posição na lista): assim, apagar
+            // uma linha não faz as outras lerem uma posição que deixou de existir.
+            ForEach(draft.folders.map(\.id), id: \.self) { id in
+                SubfolderRow(folder: folderBinding(id)) { removeFolder(id) }
             }
             Button { draft.folders.append(Subfolder("", nil)) } label: {
                 Label(L("Adicionar subpasta"), systemImage: "plus.circle.fill")
@@ -210,6 +209,17 @@ struct SetupView: View {
             Text(L("Etiquetas: {0} nome da pasta da captação · {1} só o nome · {2} {MM} {DD} data · {NNN} número com 3 dígitos (use {N}, {NN}, {NNNN}… para outros tamanhos; continua de onde a pasta parou) · {ORIGINAL} nome do arquivo no cartão. A extensão (.MP4, .WAV…) entra sozinha.", Tok.folder, Tok.name, Tok.year))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    func folderBinding(_ id: UUID) -> Binding<Subfolder> {
+        Binding(
+            get: { draft.folders.first { $0.id == id } ?? Subfolder("", nil) },
+            set: { f in if let i = draft.folders.firstIndex(where: { $0.id == id }) { draft.folders[i] = f } })
+    }
+
+    func removeFolder(_ id: UUID) {
+        draft.rules.removeAll { $0.folder == id }
+        draft.folders.removeAll { $0.id == id }
     }
 
     /// Padrão próprio de uma subpasta (nil = segue o padrão geral).
