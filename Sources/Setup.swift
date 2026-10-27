@@ -48,6 +48,7 @@ struct SetupView: View {
                 backupSection
                 foldersSection
                 filesSection
+                reportsSection
                 ignoredSection
             }
             .formStyle(.grouped)
@@ -173,6 +174,14 @@ struct SetupView: View {
                 Label(L("Adicionar subpasta"), systemImage: "plus.circle.fill")
             }
             .buttonStyle(.borderless)
+            Toggle(isOn: $draft.splitByCard) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Separar por cartão quando importar mais de um"))
+                    Text(L("Cada cartão ganha uma subpasta com o nome dele (ex.: Vídeos/CAM A). Desmarcado, os arquivos de todos os cartões ficam juntos, numerados na ordem em que foram gravados."))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.checkbox)
         } header: {
             SectionHeader(L("Pasta de cada captação"),
                           L("Como o app cria a pasta de cada gravação e as subpastas que vão dentro dela. Cada subpasta recebe os tipos de arquivo que você escolher."))
@@ -236,6 +245,62 @@ struct SetupView: View {
             })
     }
 
+    // MARK: Relatórios
+
+    var reportsSection: some View {
+        Section {
+            Toggle(isOn: $draft.reportPDF) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Gerar um relatório em PDF de cada importação"))
+                    Text(L("Captação, cartões, discos, horário, e cada arquivo com o nome original, o nome final, o tamanho e o checksum."))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.checkbox)
+            if draft.reportPDF {
+                VStack(alignment: .leading, spacing: 6) {
+                    RadioRow(L("Junto do backup: pasta Relatórios dentro da captação, em cada disco"), on: draft.reportFolder.isEmpty) {
+                        draft.reportFolder = ""
+                    }
+                    RadioRow(L("Numa pasta escolhida"), on: !draft.reportFolder.isEmpty) {
+                        if draft.reportFolder.isEmpty, let path = chooseReportFolder() { draft.reportFolder = path }
+                    }
+                    if !draft.reportFolder.isEmpty {
+                        HStack {
+                            Image(systemName: "folder.fill").foregroundStyle(Color.accentColor)
+                            Text(draft.reportFolder).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+                            Spacer()
+                            Button(L("Trocar…")) { if let p = chooseReportFolder() { draft.reportFolder = p } }
+                        }
+                    }
+                }
+                .padding(.leading, 22)
+            }
+            Toggle(isOn: $draft.mhl) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Gerar o registro ASC MHL (padrão do mercado)"))
+                    Text(L("Lista de checksums (xxHash64) que programas como Silverstack, ShotPut e OffShoot usam para conferir os arquivos depois. Fica na pasta ascmhl, dentro da captação, em cada disco."))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.checkbox)
+        } header: {
+            SectionHeader(L("Relatórios"),
+                          L("Um registro de cada importação: o que foi copiado, de qual cartão, para quais discos, e o checksum de cada arquivo. Serve para conferir depois ou para enviar ao cliente ou à produtora."))
+        }
+    }
+
+    func chooseReportFolder() -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = L("Usar esta pasta")
+        panel.message = L("Escolha ou crie a pasta onde os relatórios vão ficar")
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return url.standardizedFileURL.path
+    }
+
     // MARK: Discos ignorados
 
     var ignoredSection: some View {
@@ -294,6 +359,26 @@ struct ExampleLine: View {
             Text(text).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }
         .font(.caption)
+    }
+}
+
+/// Opção de escolha única, com a bolinha do lado esquerdo do texto.
+struct RadioRow: View {
+    let title: String
+    let on: Bool
+    let action: () -> Void
+    init(_ title: String, on: Bool, action: @escaping () -> Void) { self.title = title; self.on = on; self.action = action }
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: on ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(on ? Color.accentColor : Color.secondary)
+                Text(title).foregroundStyle(.primary)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

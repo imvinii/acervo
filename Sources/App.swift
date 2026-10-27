@@ -5,10 +5,6 @@ import SwiftUI
 import AppKit
 import UserNotifications
 
-enum AppInfo {
-    static let name = "Acervo"
-}
-
 @main
 struct AcervoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
@@ -64,7 +60,7 @@ final class Model: ObservableObject {
                 config.save()
                 selected = selected.filter { id in config.receivingFolders.contains { $0.id == id } }
                 reloadCaptures(); reloadCards()
-                if let c = selectedCard { select(card: c) }
+                rescan()
             }
         }
     }
@@ -76,7 +72,12 @@ final class Model: ObservableObject {
     @Published var search = ""
 
     @Published var cards: [Card] = []
-    @Published var selectedCard: Card?
+    /// Cartões marcados: todos vão para a mesma captação e são copiados ao mesmo tempo.
+    @Published var selectedCards: [Card] = []
+    private var scanGeneration = 0
+    /// Só os cartões de verdade (as pastas escolhidas à mão nunca são limpas nem ejetadas).
+    var realCards: [Card] { selectedCards.filter { !$0.isFolder } }
+    var selectedNames: String { ListFormatter.localizedString(byJoining: selectedCards.map(\.name)) }
     @Published var files: [SourceFile] = [] { didSet { refreshPlan() } }
     @Published var scanning = false
 
@@ -167,9 +168,13 @@ final class Model: ObservableObject {
         // Pastas escolhidas à mão continuam na lista
         found += cards.filter { $0.isFolder }
         cards = found
-        if let s = selectedCard, !cards.contains(s) { selectedCard = nil; files = [] }
-        if selectedCard == nil, let first = cards.first(where: { !$0.isFolder && Self.looksLikeCard($0.url) }) ?? cards.first {
-            select(card: first)
+        let kept = selectedCards.filter { cards.contains($0) }
+        if kept != selectedCards { selectedCards = kept; rescan() }
+        if selectedCards.isEmpty {
+            // Marca sozinho os cartões de câmera conectados (vários leitores = vários cartões)
+            let cams = cards.filter { !$0.isFolder && Self.looksLikeCard($0.url) }
+            selectedCards = cams.isEmpty ? Array(cards.prefix(1)) : cams
+            rescan()
         }
     }
 
@@ -182,19 +187,31 @@ final class Model: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let card = Card(url: url, name: url.lastPathComponent, isFolder: true)
         if !cards.contains(card) { cards.append(card) }
-        select(card: card)
+        if !selectedCards.contains(card) { selectedCards.append(card) }
+        rescan()
     }
 
-    func select(card: Card) {
-        selectedCard = card
+    /// Clique num cartão: marca ou desmarca.
+    func toggle(card: Card) {
+        if let i = selectedCards.firstIndex(of: card) { selectedCards.remove(at: i) } else { selectedCards.append(card) }
+        rescan()
+    }
+
+    /// Lê todos os cartões marcados e junta os arquivos, em ordem de gravação.
+    func rescan() {
+        scanGeneration += 1
+        let gen = scanGeneration
         files = []
+        guard !selectedCards.isEmpty else { scanning = false; return }
         scanning = true
-        let (url, cfg) = (card.url, config)
+        let (urls, cfg) = (selectedCards.map(\.url), config)
         Task.detached {
-            let found = CardScanner.scan(url, cfg)
+            let found = CardScanner.scan(urls, cfg)
+            let present = Set(found.map(\.folder))
+            let marked: Set<UUID> = Set(cfg.receivingFolders.filter { $0.onByDefault && present.contains($0.id) }.map(\.id))
             await MainActor.run {
-                guard self.selectedCard?.url == url else { return }
-                self.selected = Set(cfg.receivingFolders.filter { f in f.onByDefault && found.contains { $0.folder == f.id } }.map(\.id))
+                guard gen == self.scanGeneration else { return }
+                self.selected = marked
                 self.files = found
                 self.scanning = false
             }
@@ -255,10 +272,13 @@ final class Model: ObservableObject {
         progress = nil
         speed = 0
         speedSample = nil
+        let cfg = config
         Task.detached(priority: .userInitiated) {
-            let report = copier.run(plan) { p in
+            var made = copier.run(plan) { p in
                 Task { @MainActor in self.update(p) }
             }
+            made.warnings = Reports.write(made, cfg: cfg)
+            let report = made
             await MainActor.run {
                 self.phase = .done(report)
                 self.reloadCaptures()
@@ -282,8 +302,10 @@ final class Model: ObservableObject {
     }
 
     func cleanCard() {
-        guard case .done(let report) = phase, let card = selectedCard, !card.isFolder else { return }
-        let items = cleanupItems(report)
+        guard case .done(let report) = phase, !realCards.isEmpty else { return }
+        let roots = realCards.map(\.url)
+        let rootPaths = roots.map { $0.standardizedFileURL.path + "/" }
+        let items = cleanupItems(report).filter { i in rootPaths.contains { i.source.standardizedFileURL.path.hasPrefix($0) } }
         let copier = Copier()
         self.copier = copier
         phase = .cleaning(report)
@@ -291,7 +313,7 @@ final class Model: ObservableObject {
         speed = 0
         speedSample = nil
         Task.detached(priority: .userInitiated) {
-            let result = copier.cleanCard(root: card.url, items: items) { p in
+            let result = copier.cleanCards(roots: roots, items: items) { p in
                 Task { @MainActor in self.update(p) }
             }
             await MainActor.run {
@@ -332,14 +354,14 @@ final class Model: ObservableObject {
 
     func finish() {
         phase = .idle
-        if let c = selectedCard { select(card: c) }
+        rescan()
     }
 
     func eject() {
-        guard let c = selectedCard, !c.isFolder else { return }
-        let url = c.url
+        let urls = realCards.map(\.url)
+        guard !urls.isEmpty else { return }
         Task.detached {
-            try? NSWorkspace.shared.unmountAndEjectDevice(at: url)
+            for url in urls { try? NSWorkspace.shared.unmountAndEjectDevice(at: url) }
             await MainActor.run { self.phase = .idle; self.reloadCards() }
         }
     }
@@ -353,29 +375,6 @@ final class Model: ObservableObject {
         guard !card.isFolder, !config.ignoredVolumes.contains(card.name) else { return }
         config.ignoredVolumes.append(card.name)
     }
-}
-
-// MARK: - Formatação
-
-enum Fmt {
-    static func bytes(_ b: Int64) -> String { ByteCountFormatter.string(fromByteCount: b, countStyle: .file) }
-    static let day: DateFormatter = {
-        let f = DateFormatter(); f.locale = Lang.locale; f.setLocalizedDateFormatFromTemplate("d MMM yyyy"); return f
-    }()
-    static let month: DateFormatter = {
-        let f = DateFormatter(); f.locale = Lang.locale; f.dateFormat = "LLL"; return f
-    }()
-    /// "OUT 2026" (cabe na coluna da data)
-    static func monthYear(_ d: Date) -> String {
-        "\(month.string(from: d).trimmingCharacters(in: CharacterSet(charactersIn: "."))) \(Calendar.current.component(.year, from: d))"
-    }
-    static func duration(_ s: Double) -> String {
-        guard s.isFinite, s > 0 else { return "—" }
-        let m = Int(s) / 60, sec = Int(s) % 60
-        if m >= 60 { return "\(m / 60) h \(m % 60) min" }
-        return m > 0 ? "\(m) min \(sec) s" : "\(sec) s"
-    }
-    static func files(_ n: Int) -> String { n == 1 ? L("1 arquivo") : L("{0} arquivos", n) }
 }
 
 // MARK: - Telas
@@ -457,8 +456,8 @@ struct CardColumn: View {
                         .padding(.vertical, 40)
                     }
                     ForEach(model.cards) { card in
-                        CardRow(card: card, selected: model.selectedCard == card)
-                            .onTapGesture { model.select(card: card) }
+                        CardRow(card: card, selected: model.selectedCards.contains(card))
+                            .onTapGesture { model.toggle(card: card) }
                             .contextMenu {
                                 if !card.isFolder {
                                     Button(L("Não mostrar este disco")) { model.hide(card: card) }
@@ -468,8 +467,14 @@ struct CardColumn: View {
                 }
                 .padding(.horizontal, 14)
             }
+            if model.cards.count > 1 {
+                Text(L("Clique para marcar ou desmarcar. Os cartões marcados vão para a mesma captação e são copiados ao mesmo tempo."))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20).padding(.top, 6)
+            }
             Spacer(minLength: 0)
-            if model.selectedCard != nil {
+            if !model.selectedCards.isEmpty {
                 CardSummary().padding(14)
             }
             Button {
@@ -501,6 +506,9 @@ struct CardRow: View {
                     .foregroundStyle(selected ? .white.opacity(0.8) : .secondary)
             }
             Spacer()
+            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 16))
+                .foregroundStyle(selected ? .white : .secondary)
         }
         .padding(10)
         .foregroundStyle(selected ? .white : .primary)
@@ -513,7 +521,8 @@ struct CardSummary: View {
     @EnvironmentObject var model: Model
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(L("NO CARTÃO")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            Text(model.selectedCards.count > 1 ? L("NOS {0} CARTÕES", model.selectedCards.count) : L("NO CARTÃO"))
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
             if model.scanning {
                 HStack { ProgressView().controlSize(.small); Text(L("Lendo o cartão…")).foregroundStyle(.secondary) }
             } else {
@@ -870,7 +879,7 @@ struct PlanPreview: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
                     }
-                } else if model.selectedCard == nil {
+                } else if model.selectedCards.isEmpty {
                     Text(L("Escolha o cartão.")).font(.callout).foregroundStyle(.secondary)
                 }
             } else {
@@ -918,6 +927,7 @@ struct CopyingOverlay: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
                         if let p { Text(L("Arquivo {0} de {1}", min(p.fileIndex + 1, p.fileCount), p.fileCount)).monospacedDigit() }
+                        if let p, p.cards > 1 { Text(L("{0} cartões ao mesmo tempo", p.cards)).foregroundStyle(.secondary) }
                         if model.speed > 0, let p {
                             Text(L("{0}/s · faltam {1}", Fmt.bytes(Int64(model.speed)), Fmt.duration(Double(p.total - p.done) / model.speed)))
                                 .foregroundStyle(.secondary).monospacedDigit()
@@ -944,7 +954,7 @@ struct DoneOverlay: View {
     var ok: Bool { report.failures.isEmpty && !report.cancelled }
     /// Só oferece limpar quando tudo deu certo e é um cartão de verdade (não uma pasta escolhida).
     var canClean: Bool {
-        ok && model.selectedCard.map { !$0.isFolder } == true && !model.cleanupItems(report).isEmpty
+        ok && !model.realCards.isEmpty && !model.cleanupItems(report).isEmpty
     }
 
     var body: some View {
@@ -990,6 +1000,27 @@ struct DoneOverlay: View {
                         .frame(maxHeight: 100)
                     }
                 }
+                if ok && report.verified > 0 {
+                    // Como no Stow: só é seguro formatar com 2 cópias conferidas em discos diferentes
+                    let disks = Reports.verifiedDisks(report)
+                    let safe = disks.count >= 2
+                    Label(safe ? L("Seguro para formatar: cada arquivo está conferido em {0} discos ({1}).", disks.count, disks.joined(separator: ", "))
+                               : L("Concluído com 1 cópia ({0}). Para formatar com segurança, tenha uma segunda cópia em outro disco.", disks.first ?? ""),
+                          systemImage: safe ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(safe ? .green : .orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if model.config.reportPDF || model.config.mhl, report.verified > 0 {
+                    Label(model.config.reportPDF
+                          ? (model.config.reportFolder.isEmpty ? L("Relatório salvo na pasta Relatórios da captação.") : L("Relatório salvo em {0}.", model.config.reportFolder))
+                          : L("Checksums salvos no registro ASC MHL da captação."),
+                          systemImage: "doc.text.magnifyingglass")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(report.warnings, id: \.self) { w in
+                    Label(w, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                }
                 if report.cancelled {
                     Text(L("Os arquivos que terminaram ficaram na pasta. Importar de novo continua de onde parou."))
                         .font(.caption).foregroundStyle(.secondary)
@@ -1012,7 +1043,7 @@ struct DoneOverlay: View {
                     }
                     .padding(12)
                     .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
-                    .confirmationDialog(L("Apagar {0} do cartão {1}?", Fmt.files(items.count), model.selectedCard?.name ?? ""),
+                    .confirmationDialog(L("Apagar {0} do cartão {1}?", Fmt.files(items.count), ListFormatter.localizedString(byJoining: model.realCards.map(\.name))),
                                         isPresented: $model.showCleanConfirm) {
                         Button(L("Conferir e apagar"), role: .destructive) { model.cleanCard() }
                         Button(L("Cancelar"), role: .cancel) {}
@@ -1024,8 +1055,8 @@ struct DoneOverlay: View {
                 HStack {
                     Button(L("Mostrar no Finder")) { model.revealCapture() }
                     Spacer()
-                    if ok, let card = model.selectedCard, !card.isFolder {
-                        Button(L("Ejetar cartão")) { model.eject() }
+                    if ok, !model.realCards.isEmpty {
+                        Button(model.realCards.count > 1 ? L("Ejetar cartões") : L("Ejetar cartão")) { model.eject() }
                     }
                     Button(L("Concluir")) { model.finish() }
                         .keyboardShortcut(.defaultAction)
@@ -1052,7 +1083,7 @@ struct CleanedOverlay: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(ok ? L("Cartão limpo") : (report.cancelled ? L("Limpeza interrompida") : L("Limpeza com avisos")))
                             .font(.title2.bold())
-                        Text(model.selectedCard?.name ?? "").foregroundStyle(.secondary)
+                        Text(model.selectedNames).foregroundStyle(.secondary)
                     }
                 }
                 VStack(alignment: .leading, spacing: 6) {

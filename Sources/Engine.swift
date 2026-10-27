@@ -110,6 +110,14 @@ struct Config: Codable, Equatable, Sendable {
     var rules: [NamingRule]
     /// Discos que nunca aparecem na lista de cartões.
     var ignoredVolumes: [String]
+    /// Com mais de um cartão: cada um numa subpasta com o nome dele (ex.: Vídeos/CAM A).
+    var splitByCard = false
+    /// Relatório em PDF de cada importação.
+    var reportPDF = true
+    /// Pasta dos relatórios ("" = junto do backup, na pasta da captação).
+    var reportFolder = ""
+    /// Registro ASC MHL (lista de checksums no padrão do mercado) dentro da pasta da captação.
+    var mhl = true
 
     var inboxURL: URL { URL(fileURLWithPath: inbox) }
     var backupURLs: [URL] { backups.filter { !$0.isEmpty }.map { URL(fileURLWithPath: $0) } }
@@ -170,12 +178,34 @@ struct Config: Codable, Equatable, Sendable {
         FileManager.default.fileExists(atPath: "/Volumes/Mídias/Inbox") ? vertice : simple
     }
 
+    enum CodingKeys: String, CodingKey {
+        case inbox, backups, folderPattern, folders, rename, rules, ignoredVolumes, splitByCard, reportPDF, reportFolder, mhl
+    }
+
     static let key = "config"
     static func load() -> Config? {
         guard let d = UserDefaults.standard.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(Config.self, from: d)
     }
     func save() { UserDefaults.standard.set(try? JSONEncoder().encode(self), forKey: Self.key) }
+}
+
+extension Config {
+    /// Lê configurações salvas por versões anteriores (sem os campos novos).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        inbox = try c.decode(String.self, forKey: .inbox)
+        backups = try c.decode([String].self, forKey: .backups)
+        folderPattern = try c.decode(String.self, forKey: .folderPattern)
+        folders = try c.decode([Subfolder].self, forKey: .folders)
+        rename = try c.decode(Bool.self, forKey: .rename)
+        rules = try c.decode([NamingRule].self, forKey: .rules)
+        ignoredVolumes = try c.decode([String].self, forKey: .ignoredVolumes)
+        splitByCard = try c.decodeIfPresent(Bool.self, forKey: .splitByCard) ?? false
+        reportPDF = try c.decodeIfPresent(Bool.self, forKey: .reportPDF) ?? true
+        reportFolder = try c.decodeIfPresent(String.self, forKey: .reportFolder) ?? ""
+        mhl = try c.decodeIfPresent(Bool.self, forKey: .mhl) ?? true
+    }
 }
 
 // MARK: - Discos conectados
@@ -408,11 +438,22 @@ struct SourceFile: Sendable, Hashable {
     let size: Int64
     let date: Date
     let folder: UUID       // subpasta que recebe este arquivo
+    let card: URL          // cartão (ou pasta) de onde ele vem
+    var cardName: String { card.lastPathComponent }
 }
 
 enum CardScanner {
     /// Pastas que o cartão tem e não interessam (proxies da Sony, lixo do macOS).
     static let skippedFolders: Set<String> = [".Spotlight-V100", ".Trashes", ".fseventsd", "SUB", "THMBNL"]
+
+    /// Vários cartões: junta tudo e põe em ordem de gravação (as câmeras ficam intercaladas no tempo).
+    static func scan(_ roots: [URL], _ cfg: Config) -> [SourceFile] {
+        sorted(roots.flatMap { scan($0, cfg) })
+    }
+
+    static func sorted(_ files: [SourceFile]) -> [SourceFile] {
+        files.sorted { $0.date == $1.date ? $0.url.path.localizedStandardCompare($1.url.path) == .orderedAscending : $0.date < $1.date }
+    }
 
     static func scan(_ root: URL, _ cfg: Config) -> [SourceFile] {
         let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .creationDateKey, .contentModificationDateKey]
@@ -426,10 +467,10 @@ enum CardScanner {
                   let v = try? url.resourceValues(forKeys: Set(keys)), v.isRegularFile == true else { continue }
             out.append(SourceFile(
                 url: url, size: Int64(v.fileSize ?? 0),
-                date: [v.creationDate, v.contentModificationDate].compactMap { $0 }.min() ?? .distantPast, folder: folder.id))
+                date: [v.creationDate, v.contentModificationDate].compactMap { $0 }.min() ?? .distantPast, folder: folder.id, card: root))
         }
         // Ordem de gravação: assim o 001 é sempre o primeiro clipe/foto do dia.
-        return out.sorted { $0.date == $1.date ? $0.url.path.localizedStandardCompare($1.url.path) == .orderedAscending : $0.date < $1.date }
+        return sorted(out)
     }
 }
 
@@ -450,6 +491,8 @@ struct Duplicate: Sendable {
 
 struct ImportPlan: Sendable {
     var capture = ""
+    /// Pasta da captação em cada destino: o disco principal primeiro, depois as redundâncias.
+    var roots: [URL] = []
     var jobs: [CopyJob] = []
     var duplicates: [Duplicate] = []
     var bytes: Int64 { jobs.reduce(0) { $0 + $1.source.size } }
@@ -463,44 +506,54 @@ struct ImportPlan: Sendable {
         let index = InboxIndex(cfg, sizes: Set(chosen.map(\.size)), preferring: capture.name)
         let root = cfg.inboxURL.appendingPathComponent(capture.name)
         let backupRoots = backups.map { $0.appendingPathComponent(capture.name) }
+        plan.roots = [root] + backupRoots
+        // Com mais de um cartão e "separar por cartão", cada cartão ganha a sua subpasta
+        let split = cfg.splitByCard && Set(chosen.map(\.card)).count > 1
         for folder in cfg.receivingFolders where selected.contains(folder.id) {
-            let dest = root.appendingPathComponent(folder.trimmedPath)
-            let backupDests = backupRoots.map { $0.appendingPathComponent(folder.trimmedPath) }
-            let existing = names(in: dest)
-            var used = Set(existing)
-            for b in backupDests { used.formUnion(names(in: b)) }
-            let pattern = cfg.pattern(for: folder)
-            let numbered = pattern.map(Pattern.hasNumber) ?? false
-            let matcher = pattern.flatMap { Naming.numberMatcher($0, capture: capture) }
-            var number = (existing.compactMap { name -> Int? in
-                let stem = (name as NSString).deletingPathExtension
-                return matcher?.match(stem)?["N"].flatMap(Int.init)
-            }.max() ?? 0) + 1
+            let ofFolder = chosen.filter { $0.folder == folder.id }
+            let groups: [(String, [SourceFile])] = split
+                ? Dictionary(grouping: ofFolder, by: \.cardName).sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
+                : [("", ofFolder)]
+            for (cardName, group) in groups {
+                let sub = cardName.isEmpty ? folder.trimmedPath : "\(folder.trimmedPath)/\(cardName)"
+                let dest = root.appendingPathComponent(sub)
+                let backupDests = backupRoots.map { $0.appendingPathComponent(sub) }
+                let existing = names(in: dest)
+                var used = Set(existing)
+                for b in backupDests { used.formUnion(names(in: b)) }
+                let pattern = cfg.pattern(for: folder)
+                let numbered = pattern.map(Pattern.hasNumber) ?? false
+                let matcher = pattern.flatMap { Naming.numberMatcher($0, capture: capture) }
+                var number = (existing.compactMap { name -> Int? in
+                    let stem = (name as NSString).deletingPathExtension
+                    return matcher?.match(stem)?["N"].flatMap(Int.init)
+                }.max() ?? 0) + 1
 
-            for file in chosen where file.folder == folder.id {
-                if let dup = index.match(file) {
-                    plan.duplicates.append(dup)
-                    continue
-                }
-                func make(_ n: Int) -> String {
-                    Naming.fileName(cfg, folder: folder, capture: capture, number: n, source: file.url, date: file.date)
-                }
-                var name = make(number)
-                if numbered {
-                    while used.contains(name) { number += 1; name = make(number) }
-                    number += 1
-                } else {
-                    // Sem número (ex.: nome original): nomes repetidos ganham " (2)", " (3)"…
-                    let base = name as NSString
-                    var k = 2
-                    while used.contains(name) {
-                        name = "\(base.deletingPathExtension) (\(k)).\(base.pathExtension)"
-                        k += 1
+                for file in group {
+                    if let dup = index.match(file) {
+                        plan.duplicates.append(dup)
+                        continue
                     }
+                    func make(_ n: Int) -> String {
+                        Naming.fileName(cfg, folder: folder, capture: capture, number: n, source: file.url, date: file.date)
+                    }
+                    var name = make(number)
+                    if numbered {
+                        while used.contains(name) { number += 1; name = make(number) }
+                        number += 1
+                    } else {
+                        // Sem número (ex.: nome original): nomes repetidos ganham " (2)", " (3)"…
+                        let base = name as NSString
+                        var k = 2
+                        while used.contains(name) {
+                            name = "\(base.deletingPathExtension) (\(k)).\(base.pathExtension)"
+                            k += 1
+                        }
+                    }
+                    used.insert(name)
+                    plan.jobs.append(CopyJob(source: file, targets: [dest.appendingPathComponent(name)]
+                                             + backupDests.map { $0.appendingPathComponent(name) }))
                 }
-                used.insert(name)
-                plan.jobs.append(CopyJob(source: file, targets: [dest.appendingPathComponent(name)]
-                                         + backupDests.map { $0.appendingPathComponent(name) }))
             }
         }
         return plan
@@ -573,16 +626,32 @@ struct VerifiedCopy: Sendable {
     let size: Int64
 }
 
+/// Um arquivo copiado e conferido (para o relatório e o ASC MHL).
+struct FileEntry: Sendable {
+    let source: URL
+    let cardName: String
+    let size: Int64
+    let hash: String          // xxHash64
+    let targets: [URL]        // cópia em cada destino, na mesma ordem de ImportPlan.roots
+    let modified: Date
+    let hashDate: Date
+}
+
 struct ImportReport: Sendable {
     var plan = ImportPlan()
     var copies: [VerifiedCopy] = []
+    var entries: [FileEntry] = []
     var copied: [UUID: Int] = [:]
     var verified = 0
     var skipped = 0
     var failures: [String] = []
+    /// Avisos que não afetam as cópias (ex.: relatório que não pôde ser salvo).
+    var warnings: [String] = []
     var cancelled = false
     var bytes: Int64 = 0
-    var seconds: Double = 0
+    var start = Date()
+    var end = Date()
+    var seconds: Double { end.timeIntervalSince(start) }
 }
 
 final class Copier: @unchecked Sendable {
@@ -595,70 +664,94 @@ final class Copier: @unchecked Sendable {
         var done: Int64; var total: Int64
         var fileIndex: Int; var fileCount: Int
         var fileName: String; var phase: String
+        var cards = 1         // cartões sendo copiados ao mesmo tempo
     }
 
     static let chunk = 8 * 1024 * 1024
 
     /// Copia cada arquivo para um temporário oculto, relê a cópia do disco (sem cache),
-    /// compara o SHA-256 com o do original e só então dá o nome final.
+    /// compara o xxHash64 com o do original e só então dá o nome final.
+    /// Cada cartão é copiado ao mesmo tempo que os outros (um leitor não espera o outro).
     func run(_ plan: ImportPlan, onProgress: @escaping @Sendable (Progress) -> Void) -> ImportReport {
+        let state = NSLock()
         var report = ImportReport()
         report.plan = plan
         report.skipped = plan.duplicates.count
-        let start = Date()
+        report.start = Date()
         let total = plan.jobs.reduce(Int64(0)) { $0 + $1.source.size * Int64(1 + $1.targets.count) }
         var done: Int64 = 0
+        var finished = 0
         var lastReport = Date.distantPast
-        let buffer = UnsafeMutableRawPointer.allocate(byteCount: Self.chunk, alignment: 4096)
-        defer { buffer.deallocate() }
         let copying = L("Copiando"), checking = L("Conferindo")
+        // Um grupo por cartão, na ordem do plano
+        var order: [URL] = []
+        var byCard: [URL: [CopyJob]] = [:]
+        for j in plan.jobs {
+            if byCard[j.source.card] == nil { order.append(j.source.card) }
+            byCard[j.source.card, default: []].append(j)
+        }
 
-        func tick(_ i: Int, _ name: String, _ phase: String, force: Bool = false) {
+        func tick(_ name: String, _ phase: String, add: Int64 = 0, force: Bool = false) {
+            state.lock()
+            done += add
             let now = Date()
-            if force || now.timeIntervalSince(lastReport) > 0.1 {
-                lastReport = now
-                onProgress(Progress(done: done, total: total, fileIndex: i, fileCount: plan.jobs.count,
-                                    fileName: name, phase: phase))
-            }
+            let send = force || now.timeIntervalSince(lastReport) > 0.1
+            if send { lastReport = now }
+            let p = Progress(done: done, total: total, fileIndex: finished, fileCount: plan.jobs.count,
+                             fileName: name, phase: phase, cards: order.count)
+            state.unlock()
+            if send { onProgress(p) }
         }
 
-        for (i, job) in plan.jobs.enumerated() {
-            if isCancelled { report.cancelled = true; break }
-            tick(i, job.name, copying, force: true)
-            let temps = job.targets.map { $0.deletingLastPathComponent().appendingPathComponent(".\($0.lastPathComponent).importando") }
-            do {
-                for t in job.targets {
-                    try FileManager.default.createDirectory(at: t.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    if FileManager.default.fileExists(atPath: t.path) { throw CopyError.exists(t.lastPathComponent) }
+        DispatchQueue.concurrentPerform(iterations: order.count) { g in
+            let buffer = UnsafeMutableRawPointer.allocate(byteCount: Self.chunk, alignment: 4096)
+            defer { buffer.deallocate() }
+            for job in byCard[order[g]]! {
+                if isCancelled { state.withLock { report.cancelled = true }; break }
+                tick(job.name, copying, force: true)
+                let temps = job.targets.map { $0.deletingLastPathComponent().appendingPathComponent(".\($0.lastPathComponent).importando") }
+                do {
+                    for t in job.targets {
+                        try FileManager.default.createDirectory(at: t.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        if FileManager.default.fileExists(atPath: t.path) { throw CopyError.exists(t.lastPathComponent) }
+                    }
+                    let digest = try copy(job.source.url, to: temps, buffer: buffer) { n in tick(job.name, copying, add: n) }
+                    let modified = (try? job.source.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? job.source.date
+                    for (t, final) in zip(temps, job.targets) {
+                        tick(job.name, checking, force: true)
+                        let check = try hash(t, buffer: buffer) { n in tick(job.name, checking, add: n) }
+                        guard check == digest else { throw CopyError.mismatch(final.lastPathComponent) }
+                        try FileManager.default.setAttributes([.creationDate: job.source.date, .modificationDate: modified], ofItemAtPath: t.path)
+                        try FileManager.default.moveItem(at: t, to: final)
+                    }
+                    let entry = FileEntry(source: job.source.url, cardName: job.source.cardName, size: job.source.size,
+                                          hash: XXH64.hex(digest), targets: job.targets, modified: modified, hashDate: Date())
+                    state.withLock {
+                        report.copies.append(VerifiedCopy(source: job.source.url, copy: job.targets[0], size: job.source.size))
+                        report.entries.append(entry)
+                        report.copied[job.source.folder, default: 0] += 1
+                        report.verified += 1
+                        report.bytes += job.source.size
+                        finished += 1
+                    }
+                } catch CopyError.cancelled {
+                    for t in temps { try? FileManager.default.removeItem(at: t) }   // só a cópia incompleta
+                    state.withLock { report.cancelled = true }
+                    break
+                } catch {
+                    for t in temps { try? FileManager.default.removeItem(at: t) }   // só a cópia que falhou
+                    state.withLock {
+                        report.failures.append("\(job.source.url.lastPathComponent) → \(job.name): \(error.localizedDescription)")
+                        finished += 1
+                    }
                 }
-                let digest = try copy(job.source.url, to: temps, buffer: buffer) { n in
-                    done += n; tick(i, job.name, copying)
-                }
-                for (t, final) in zip(temps, job.targets) {
-                    tick(i, job.name, checking, force: true)
-                    let check = try hash(t, buffer: buffer) { n in done += n; tick(i, job.name, checking) }
-                    guard check == digest else { throw CopyError.mismatch(final.lastPathComponent) }
-                    try FileManager.default.setAttributes(
-                        [.creationDate: job.source.date,
-                         .modificationDate: (try? job.source.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? job.source.date],
-                        ofItemAtPath: t.path)
-                    try FileManager.default.moveItem(at: t, to: final)
-                }
-                report.copies.append(VerifiedCopy(source: job.source.url, copy: job.targets[0], size: job.source.size))
-                report.copied[job.source.folder, default: 0] += 1
-                report.verified += 1
-                report.bytes += job.source.size
-            } catch CopyError.cancelled {
-                for t in temps { try? FileManager.default.removeItem(at: t) }   // só a cópia incompleta
-                report.cancelled = true
-                break
-            } catch {
-                for t in temps { try? FileManager.default.removeItem(at: t) }   // só a cópia que falhou
-                report.failures.append("\(job.source.url.lastPathComponent) → \(job.name): \(error.localizedDescription)")
             }
         }
-        report.seconds = Date().timeIntervalSince(start)
-        tick(plan.jobs.count, "", L("Pronto"), force: true)
+        // Relatório na ordem de gravação, não na ordem em que os cartões terminaram
+        let rank = Dictionary(uniqueKeysWithValues: plan.jobs.enumerated().map { ($1.source.url, $0) })
+        report.entries.sort { rank[$0.source, default: 0] < rank[$1.source, default: 0] }
+        report.end = Date()
+        tick("", L("Pronto"), force: true)
         return report
     }
 
@@ -670,9 +763,9 @@ final class Copier: @unchecked Sendable {
         var cancelled = false
     }
 
-    /// Limpa o cartão: relê o original e a cópia inteiros, compara o SHA-256
+    /// Limpa os cartões: relê o original e a cópia inteiros, compara o xxHash64
     /// e só então apaga o original. O que não bater (ou sumir do disco) fica no cartão.
-    func cleanCard(root: URL, items: [VerifiedCopy], onProgress: @escaping @Sendable (Progress) -> Void) -> CleanupReport {
+    func cleanCards(roots: [URL], items: [VerifiedCopy], onProgress: @escaping @Sendable (Progress) -> Void) -> CleanupReport {
         var report = CleanupReport()
         let total = items.reduce(Int64(0)) { $0 + $1.size * 2 }
         var done: Int64 = 0
@@ -690,14 +783,15 @@ final class Copier: @unchecked Sendable {
             }
         }
 
-        let rootPath = root.standardizedFileURL.path + "/"
+        let rootPaths = roots.map { $0.standardizedFileURL.path + "/" }
         for (i, item) in items.enumerated() {
             if isCancelled { report.cancelled = true; break }
             let name = item.source.lastPathComponent
             tick(i, name, checking, force: true)
             do {
-                // Segurança: só apaga dentro do cartão escolhido.
-                guard item.source.standardizedFileURL.path.hasPrefix(rootPath) else { throw CopyError.outside(name) }
+                // Segurança: só apaga dentro dos cartões escolhidos.
+                let path = item.source.standardizedFileURL.path
+                guard rootPaths.contains(where: { path.hasPrefix($0) }) else { throw CopyError.outside(name) }
                 guard FileManager.default.fileExists(atPath: item.copy.path) else { throw CopyError.missing(item.copy.lastPathComponent) }
                 let original = try hash(item.source, buffer: buffer) { n in done += n; tick(i, name, checking) }
                 let copy = try hash(item.copy, buffer: buffer) { n in done += n; tick(i, name, checking) }
@@ -712,11 +806,13 @@ final class Copier: @unchecked Sendable {
                 report.problems.append(L("{0}: {1}. Ficou no cartão.", name, error.localizedDescription))
             }
         }
-        // O que sobrou no cartão (JPG, proxies, arquivos da câmera…)
-        if let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey],
-                                                  options: [.skipsHiddenFiles]) {
-            for case let url as URL in e where (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
-                report.leftovers += 1
+        // O que sobrou nos cartões (JPG, proxies, arquivos da câmera…)
+        for root in roots {
+            if let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey],
+                                                      options: [.skipsHiddenFiles]) {
+                for case let url as URL in e where (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+                    report.leftovers += 1
+                }
             }
         }
         tick(items.count, "", L("Pronto"), force: true)
@@ -740,7 +836,7 @@ final class Copier: @unchecked Sendable {
     }
 
     private func copy(_ src: URL, to dests: [URL], buffer: UnsafeMutableRawPointer,
-                      progress: (Int64) -> Void) throws -> SHA256.Digest {
+                      progress: (Int64) -> Void) throws -> UInt64 {
         let inFD = open(src.path, O_RDONLY)
         guard inFD >= 0 else { throw CopyError.open(src.lastPathComponent) }
         defer { close(inFD) }
@@ -753,13 +849,13 @@ final class Copier: @unchecked Sendable {
             _ = fcntl(fd, F_NOCACHE, 1)
             outFDs.append(fd)
         }
-        var hasher = SHA256()
+        var hasher = XXH64()
         while true {
             if isCancelled { throw CopyError.cancelled }
             let n = read(inFD, buffer, Self.chunk)
             if n < 0 { throw CopyError.read(src.lastPathComponent) }
             if n == 0 { break }
-            hasher.update(bufferPointer: UnsafeRawBufferPointer(start: buffer, count: n))
+            hasher.update(UnsafeRawBufferPointer(start: buffer, count: n))
             for (fd, d) in zip(outFDs, dests) {
                 var off = 0
                 while off < n {
@@ -771,23 +867,23 @@ final class Copier: @unchecked Sendable {
             progress(Int64(n))
         }
         for (fd, d) in zip(outFDs, dests) where fsync(fd) != 0 { throw CopyError.write(d.lastPathComponent) }
-        return hasher.finalize()
+        return hasher.digest()
     }
 
-    private func hash(_ url: URL, buffer: UnsafeMutableRawPointer, progress: (Int64) -> Void) throws -> SHA256.Digest {
+    private func hash(_ url: URL, buffer: UnsafeMutableRawPointer, progress: (Int64) -> Void) throws -> UInt64 {
         let fd = open(url.path, O_RDONLY)
         guard fd >= 0 else { throw CopyError.open(url.lastPathComponent) }
         defer { close(fd) }
         _ = fcntl(fd, F_NOCACHE, 1)
-        var hasher = SHA256()
+        var hasher = XXH64()
         while true {
             if isCancelled { throw CopyError.cancelled }
             let n = read(fd, buffer, Self.chunk)
             if n < 0 { throw CopyError.read(url.lastPathComponent) }
             if n == 0 { break }
-            hasher.update(bufferPointer: UnsafeRawBufferPointer(start: buffer, count: n))
+            hasher.update(UnsafeRawBufferPointer(start: buffer, count: n))
             progress(Int64(n))
         }
-        return hasher.finalize()
+        return hasher.digest()
     }
 }

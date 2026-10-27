@@ -256,6 +256,65 @@ enum Translations {
             ("Tags: {0} shoot folder name · {1} name only · {2} {MM} {DD} date · {NNN} 3-digit number (use {N}, {NN}, {NNNN}… for other lengths; continues where the folder left off) · {ORIGINAL} file name on the card. The extension (.MP4, .WAV…) is added automatically.",
              "Etiquetas: {0} nombre de la carpeta del rodaje · {1} solo el nombre · {2} {MM} {DD} fecha · {NNN} número de 3 dígitos (usa {N}, {NN}, {NNNN}… para otros tamaños; continúa donde quedó la carpeta) · {ORIGINAL} nombre del archivo en la tarjeta. La extensión (.MP4, .WAV…) se añade sola."),
 
+        // Vários cartões
+        "Clique para marcar ou desmarcar. Os cartões marcados vão para a mesma captação e são copiados ao mesmo tempo.":
+            ("Click to check or uncheck. Checked cards go into the same shoot and are copied at the same time.",
+             "Haz clic para marcar o desmarcar. Las tarjetas marcadas van al mismo rodaje y se copian a la vez."),
+        "NOS {0} CARTÕES": ("ON {0} CARDS", "EN {0} TARJETAS"),
+        "{0} cartões ao mesmo tempo": ("{0} cards at the same time", "{0} tarjetas a la vez"),
+        "Ejetar cartões": ("Eject cards", "Expulsar tarjetas"),
+        "Separar por cartão quando importar mais de um": ("Separate by card when importing more than one", "Separar por tarjeta al importar más de una"),
+        "Cada cartão ganha uma subpasta com o nome dele (ex.: Vídeos/CAM A). Desmarcado, os arquivos de todos os cartões ficam juntos, numerados na ordem em que foram gravados.":
+            ("Each card gets a subfolder with its name (e.g. Videos/CAM A). Unchecked, files from all cards stay together, numbered in the order they were recorded.",
+             "Cada tarjeta recibe una subcarpeta con su nombre (ej.: Videos/CAM A). Desmarcado, los archivos de todas las tarjetas quedan juntos, numerados en el orden en que se grabaron."),
+        "Seguro para formatar: cada arquivo está conferido em {0} discos ({1}).": ("Safe to format: every file is verified on {0} drives ({1}).", "Seguro para formatear: cada archivo está verificado en {0} discos ({1})."),
+        "Concluído com 1 cópia ({0}). Para formatar com segurança, tenha uma segunda cópia em outro disco.":
+            ("Done with 1 copy ({0}). To format safely, keep a second copy on another drive.", "Terminado con 1 copia ({0}). Para formatear con seguridad, ten una segunda copia en otro disco."),
+
+        // Relatórios
+        "Relatórios": ("Reports", "Informes"),
+        "Um registro de cada importação: o que foi copiado, de qual cartão, para quais discos, e o checksum de cada arquivo. Serve para conferir depois ou para enviar ao cliente ou à produtora.":
+            ("A record of each import: what was copied, from which card, to which drives, and the checksum of every file. Useful for checking later or sending to the client or production company.",
+             "Un registro de cada importación: qué se copió, de qué tarjeta, a qué discos y el checksum de cada archivo. Sirve para verificar después o para enviar al cliente o a la productora."),
+        "Gerar um relatório em PDF de cada importação": ("Create a PDF report for each import", "Generar un informe PDF de cada importación"),
+        "Captação, cartões, discos, horário, e cada arquivo com o nome original, o nome final, o tamanho e o checksum.":
+            ("Shoot, cards, drives, time, and every file with its original name, final name, size and checksum.", "Rodaje, tarjetas, discos, hora, y cada archivo con su nombre original, nombre final, tamaño y checksum."),
+        "Junto do backup: pasta Relatórios dentro da captação, em cada disco": ("With the backup: a Reports folder inside the shoot, on each drive", "Junto a la copia: carpeta Informes dentro del rodaje, en cada disco"),
+        "Numa pasta escolhida": ("In a folder of my choice", "En una carpeta elegida"),
+        "Trocar…": ("Change…", "Cambiar…"),
+        "Escolha ou crie a pasta onde os relatórios vão ficar": ("Choose or create the folder for the reports", "Elige o crea la carpeta para los informes"),
+        "Gerar o registro ASC MHL (padrão do mercado)": ("Create the ASC MHL record (industry standard)", "Generar el registro ASC MHL (estándar del sector)"),
+        "Lista de checksums (xxHash64) que programas como Silverstack, ShotPut e OffShoot usam para conferir os arquivos depois. Fica na pasta ascmhl, dentro da captação, em cada disco.":
+            ("A list of checksums (xxHash64) that apps like Silverstack, ShotPut and OffShoot use to verify files later. It goes in the ascmhl folder inside the shoot, on each drive.",
+             "Lista de checksums (xxHash64) que programas como Silverstack, ShotPut y OffShoot usan para verificar los archivos después. Va en la carpeta ascmhl, dentro del rodaje, en cada disco."),
+        "Relatório salvo na pasta Relatórios da captação.": ("Report saved in the shoot’s Reports folder.", "Informe guardado en la carpeta Informes del rodaje."),
+        "Relatório salvo em {0}.": ("Report saved in {0}.", "Informe guardado en {0}."),
+        "Checksums salvos no registro ASC MHL da captação.": ("Checksums saved in the shoot’s ASC MHL record.", "Checksums guardados en el registro ASC MHL del rodaje."),
+        "ASC MHL em {0}: {1}": ("ASC MHL on {0}: {1}", "ASC MHL en {0}: {1}"),
+        "Relatório em {0}: {1}": ("Report in {0}: {1}", "Informe en {0}: {1}"),
+
+        // PDF
+        "Relatório de importação": ("Import report", "Informe de importación"),
+        "Início": ("Start", "Inicio"),
+        "Fim": ("End", "Fin"),
+        "Duração": ("Duration", "Duración"),
+        "Copiados e conferidos": ("Copied and verified", "Copiados y verificados"),
+        "Já importados antes (não copiados)": ("Already imported (not copied)", "Ya importados (no copiados)"),
+        "Com problema": ("With problems", "Con problemas"),
+        "Conferência": ("Verification", "Verificación"),
+        "xxHash64; cada cópia é relida do disco e comparada com o original": ("xxHash64; every copy is read back from disk and compared with the original", "xxHash64; cada copia se vuelve a leer del disco y se compara con el original"),
+        "Cartões": ("Cards", "Tarjetas"),
+        "Destinos": ("Destinations", "Destinos"),
+        "Redundância": ("Redundancy", "Redundancia"),
+        "Arquivos copiados": ("Copied files", "Archivos copiados"),
+        "Nome final": ("Final name", "Nombre final"),
+        "Original no cartão": ("Original on card", "Original en la tarjeta"),
+        "Tamanho": ("Size", "Tamaño"),
+        "Já estavam no disco (não copiados de novo)": ("Already on the drive (not copied again)", "Ya estaban en el disco (no se copiaron de nuevo)"),
+        "Gerado pelo {0}. O registro ASC MHL (pasta ascmhl, dentro da captação) guarda os mesmos checksums no padrão do mercado.":
+            ("Created by {0}. The ASC MHL record (ascmhl folder, inside the shoot) keeps the same checksums in the industry-standard format.",
+             "Generado por {0}. El registro ASC MHL (carpeta ascmhl, dentro del rodaje) guarda los mismos checksums en el formato estándar del sector."),
+
         "Discos que não aparecem como cartão": ("Drives that never show up as cards", "Discos que no aparecen como tarjeta"),
         "O app mostra como cartão todo disco removível que for conectado. Para não correr o risco de importar (ou limpar) os arquivos de um disco de trabalho, coloque aqui os discos que são seguros e nunca são cartões, como SSDs e HDs de backup. Os discos principal e de redundância já ficam de fora sozinhos.":
             ("The app shows every removable drive you connect as a card. To avoid importing (or erasing) files from a work drive by mistake, add here the drives that are safe and are never cards, like SSDs and backup drives. The main and redundancy drives are already left out automatically.",
