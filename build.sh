@@ -2,10 +2,15 @@
 # Compila o app e monta o "Importar Cartão.app" em ./build
 set -euo pipefail
 cd "$(dirname "$0")"
+VERSION="2.0"
 APP="build/Importar Cartão.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" build/icon.iconset
-swiftc -O -swift-version 5 -enable-bare-slash-regex -target arm64-apple-macos14.0 -parse-as-library \
-  Sources/Engine.swift Sources/App.swift -o "$APP/Contents/MacOS/Importar Cartao"
+# Universal: roda em Mac com Apple Silicon e com Intel
+for arch in arm64 x86_64; do
+  swiftc -O -swift-version 5 -enable-bare-slash-regex -target $arch-apple-macos14.0 -parse-as-library \
+    Sources/*.swift -o "build/Importar Cartao-$arch"
+done
+lipo -create "build/Importar Cartao-arm64" "build/Importar Cartao-x86_64" -output "$APP/Contents/MacOS/Importar Cartao"
 swiftc -swift-version 5 MakeIcon.swift -o build/makeicon && build/makeicon build/icon.png
 for s in 16 32 128 256 512; do
   sips -z $s $s build/icon.png --out build/icon.iconset/icon_${s}x${s}.png >/dev/null
@@ -22,8 +27,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>Importar Cartao</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.video</string>
   <key>NSHighResolutionCapable</key><true/>

@@ -1,0 +1,28 @@
+IMPORTAR CARTÃO
+Backup dos cartões de memória depois de uma gravação, com conferência de cada arquivo.
+
+INSTALAR
+1. Arraste "Importar Cartão" para a pasta Aplicativos.
+2. Na primeira vez, o macOS avisa que não pode verificar o desenvolvedor
+   (o app não é distribuído pela App Store). Para liberar:
+   - Abra o app uma vez e feche o aviso.
+   - Vá em Ajustes do Sistema > Privacidade e Segurança, role até o fim
+     e clique em "Abrir Mesmo Assim" ao lado de "Importar Cartão".
+   - Confirme com a senha do Mac. Depois disso ele abre normalmente.
+
+PRIMEIRA ABERTURA
+O app pede:
+- Destino principal: a pasta (num SSD, por exemplo) onde ficam as captações.
+- Redundância (opcional): uma pasta em outro disco que recebe uma cópia idêntica.
+- Como nomear a pasta de cada captação e os arquivos (há modelos prontos).
+Tudo pode ser mudado depois em Importar Cartão > Ajustes (⌘,).
+
+COMO USAR
+1. Coloque o cartão no leitor (ou escolha uma pasta).
+2. Escolha a captação ou crie uma nova.
+3. Marque o que importar (vídeos, fotos RAW, áudios MP3/WAV, documentos PDF/Word)
+   e clique em Importar.
+Cada arquivo é relido depois da cópia e comparado com o original. Nada é
+sobrescrito, e o cartão só é limpo se você pedir, no fim.
+
+Requer macOS 14 (Sonoma) ou mais novo. Funciona em Mac com Apple Silicon e Intel.

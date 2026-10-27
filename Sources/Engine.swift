@@ -4,75 +4,227 @@
 import Foundation
 import CryptoKit
 
-// MARK: - Caminhos (podem ser trocados para teste: -inbox <pasta> -backup <pasta>)
+// MARK: - Configuração (escolhida na primeira abertura, muda em Ajustes)
 
-enum Paths {
-    static var inbox: URL {
-        URL(fileURLWithPath: UserDefaults.standard.string(forKey: "inbox") ?? "/Volumes/Mídias/Inbox")
+struct Config: Codable, Equatable, Sendable {
+    /// Destino principal: a pasta onde ficam as captações.
+    var inbox: String
+    /// Cópia de redundância em outro disco ("" = sem redundância).
+    var backup: String
+    /// Nome da pasta de cada captação, ex.: "{AAAA}{MM}{DD} - {NOME}".
+    var folderPattern: String
+    /// Subpasta de cada tipo dentro da captação (chave = Kind.rawValue).
+    var subpaths: [String: String]
+    /// Pastas criadas vazias em toda captação nova, ex.: "Fotos/Seleção".
+    var extraFolders: [String]
+    /// Nome de cada arquivo, ex.: "{PASTA} - {NNN}" (a extensão entra sozinha).
+    var filePatterns: [String: String]
+    /// Discos que nunca aparecem na lista de cartões.
+    var ignoredVolumes: [String]
+
+    var inboxURL: URL { URL(fileURLWithPath: inbox) }
+    var backupURL: URL? { backup.isEmpty ? nil : URL(fileURLWithPath: backup) }
+    func subpath(_ k: Kind) -> String {
+        let s = (subpaths[k.rawValue] ?? "").trimmingCharacters(in: .whitespaces)
+        return s.isEmpty ? k.defaultSubpath : s
     }
-    static var backup: URL {
-        URL(fileURLWithPath: UserDefaults.standard.string(forKey: "backup") ?? "/Volumes/Projetos/Inbox (BACKUP)")
+    func filePattern(_ k: Kind) -> String {
+        let s = (filePatterns[k.rawValue] ?? "").trimmingCharacters(in: .whitespaces)
+        return s.isEmpty ? "{ORIGINAL}" : s
     }
-    /// Subpastas criadas numa captação nova (as mesmas do atalho "Criar projeto").
-    static let captureSubfolders = ["Vídeos", "Fotos/Brutas", "Fotos/Seleção", "Lapela"]
+    /// Subpastas criadas numa captação nova (documentos só quando houver algum).
+    var captureFolders: [String] {
+        var out: [String] = []
+        for f in Kind.allCases.filter({ $0 != .documentos }).map(subpath) + extraFolders where !out.contains(f) && !f.isEmpty {
+            out.append(f)
+        }
+        return out
+    }
+
+    /// Modelo para quem está começando.
+    static let simple = Config(
+        inbox: "", backup: "", folderPattern: "{AAAA}{MM}{DD} - {NOME}",
+        subpaths: ["videos": "Vídeos", "fotos": "Fotos", "audios": "Áudios", "documentos": "Documentos"],
+        extraFolders: [],
+        filePatterns: ["videos": "{PASTA} - {NNN}", "fotos": "{PASTA} - {NNN}", "audios": "{PASTA} - {NNN}", "documentos": "{ORIGINAL}"],
+        ignoredVolumes: [])
+
+    /// Padrão da Vértice (o mesmo dos atalhos "Criar projeto" e "Importar SD").
+    static let vertice = Config(
+        inbox: "/Volumes/Mídias/Inbox", backup: "/Volumes/Projetos/Inbox (BACKUP)", folderPattern: "{AAAA}{MM}{DD} - {NOME}",
+        subpaths: ["videos": "Vídeos", "fotos": "Fotos/Brutas", "audios": "Lapela", "documentos": "Documentos"],
+        extraFolders: ["Fotos/Seleção"],
+        filePatterns: ["videos": "{PASTA} - {NNN}", "fotos": "{PASTA} - {NNN}", "audios": "{PASTA}.{N}", "documentos": "{ORIGINAL}"],
+        ignoredVolumes: ["Elements"])
+
+    /// Sugestão da primeira abertura: o padrão da Vértice se os SSDs dela estiverem neste Mac.
+    static var suggested: Config {
+        FileManager.default.fileExists(atPath: vertice.inbox) ? vertice : simple
+    }
+
+    static let key = "config"
+    static func load() -> Config? {
+        guard let d = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(Config.self, from: d)
+    }
+    func save() { UserDefaults.standard.set(try? JSONEncoder().encode(self), forKey: Self.key) }
+}
+
+// MARK: - Padrões de nome
+
+/// Etiquetas: {PASTA} nome da pasta da captação, {NOME} só o nome (sem a data),
+/// {AAAA} {AA} {MM} {DD} data da captação, {N} {NN} {NNN}… número com esse tanto
+/// de dígitos, {ORIGINAL} nome do arquivo no cartão.
+enum Pattern {
+    static let token = /\{([A-Z]+)\}/
+
+    static func render(_ pattern: String, folder: String = "", title: String = "", date: Date?,
+                       original: String = "", number: Int = 1) -> String {
+        let c = date.map { Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: $0) }
+        let out = pattern.replacing(token) { m -> String in
+            let name = String(m.1)
+            switch name {
+            case "PASTA": return folder
+            case "NOME": return title
+            case "ORIGINAL": return original
+            case "AAAA": return c.map { String(format: "%04d", $0.year ?? 0) } ?? name
+            case "AA": return c.map { String(format: "%02d", ($0.year ?? 0) % 100) } ?? name
+            case "MM": return c.map { String(format: "%02d", $0.month ?? 0) } ?? name
+            case "DD": return c.map { String(format: "%02d", $0.day ?? 0) } ?? name
+            case _ where name.allSatisfy({ $0 == "N" }): return String(format: "%0\(name.count)d", number)
+            default: return "{\(name)}"
+            }
+        }
+        // "/" e ":" não podem entrar em nome de arquivo no Mac
+        return out.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    static func hasNumber(_ pattern: String) -> Bool { pattern.contains(/\{N+\}/) }
+
+    /// Reconhece nomes feitos com o padrão. `fixed` dá o valor de etiquetas já conhecidas;
+    /// as outras viram grupos que dá para ler (data, nome, número).
+    struct Matcher {
+        let re: NSRegularExpression
+        let groups: [String]
+
+        init?(_ pattern: String, fixed: [String: String] = [:]) {
+            var out = "^", groups: [String] = []
+            var rest = Substring(pattern)
+            while let m = rest.firstMatch(of: Pattern.token) {
+                out += NSRegularExpression.escapedPattern(for: String(rest[..<m.range.lowerBound]))
+                let name = String(m.1)
+                let group = name.allSatisfy({ $0 == "N" }) ? "N" : name
+                if let v = fixed[name] {
+                    out += NSRegularExpression.escapedPattern(for: v)
+                } else if groups.contains(group) {
+                    out += ".+?"
+                } else {
+                    groups.append(group)
+                    switch group {
+                    case "AAAA": out += "(?<AAAA>\\d{4})"
+                    case "AA", "MM", "DD": out += "(?<\(group)>\\d{2})"
+                    case "N": out += "(?<N>\\d+)"
+                    default: out += "(?<\(group)>.+?)"
+                    }
+                }
+                rest = rest[m.range.upperBound...]
+            }
+            out += NSRegularExpression.escapedPattern(for: String(rest)) + "$"
+            guard let re = try? NSRegularExpression(pattern: out) else { return nil }
+            self.re = re
+            self.groups = groups
+        }
+
+        func match(_ s: String) -> [String: String]? {
+            let ns = s as NSString
+            guard let m = re.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)) else { return nil }
+            var out: [String: String] = [:]
+            for g in groups {
+                let r = m.range(withName: g)
+                if r.location != NSNotFound { out[g] = ns.substring(with: r) }
+            }
+            return out
+        }
+    }
+
+    static func date(from g: [String: String]) -> Date? {
+        guard let m = g["MM"].flatMap(Int.init), let d = g["DD"].flatMap(Int.init) else { return nil }
+        let y = g["AAAA"].flatMap(Int.init) ?? g["AA"].flatMap(Int.init).map { 2000 + $0 }
+        guard let y else { return nil }
+        return Calendar(identifier: .gregorian).date(from: DateComponents(year: y, month: m, day: d))
+    }
 }
 
 // MARK: - Tipos de arquivo
 
 enum Kind: String, CaseIterable, Identifiable, Sendable {
-    case videos, fotos, lapela
+    case videos, fotos, audios, documentos
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .videos: "Vídeos"
         case .fotos: "Fotos RAW"
-        case .lapela: "Áudios de lapela"
+        case .audios: "Áudios (MP3 e WAV)"
+        case .documentos: "Documentos (PDF e Word)"
+        }
+    }
+    var shortTitle: String {
+        switch self {
+        case .videos: "Vídeos"
+        case .fotos: "Fotos"
+        case .audios: "Áudios"
+        case .documentos: "Documentos"
         }
     }
     func label(_ n: Int) -> String {
         switch self {
         case .videos: n == 1 ? "1 vídeo" : "\(n) vídeos"
         case .fotos: n == 1 ? "1 foto RAW" : "\(n) fotos RAW"
-        case .lapela: n == 1 ? "1 áudio de lapela" : "\(n) áudios de lapela"
+        case .audios: n == 1 ? "1 áudio" : "\(n) áudios"
+        case .documentos: n == 1 ? "1 documento" : "\(n) documentos"
         }
     }
     var symbol: String {
         switch self {
         case .videos: "video.fill"
         case .fotos: "camera.fill"
-        case .lapela: "mic.fill"
+        case .audios: "waveform"
+        case .documentos: "doc.text.fill"
         }
     }
     var extensions: Set<String> {
         switch self {
-        case .videos: ["mp4", "mov"]
-        case .fotos: ["cr2", "cr3", "arw"]
-        case .lapela: ["wav"]
+        case .videos: ["mp4", "mov", "mxf", "braw"]
+        case .fotos: ["cr2", "cr3", "arw", "nef", "raf", "rw2", "orf", "dng"]
+        case .audios: ["wav", "mp3"]
+        case .documentos: ["pdf", "doc", "docx", "pages", "rtf", "odt"]
         }
     }
-    /// Pasta de destino dentro da captação.
-    var subpath: String {
-        switch self {
-        case .videos: "Vídeos"
-        case .fotos: "Fotos/Brutas"
-        case .lapela: "Lapela"
-        }
+    var defaultSubpath: String { shortTitle }
+    /// Já vem marcado quando aparece no cartão; documentos só se a pessoa marcar.
+    var onByDefault: Bool { self != .documentos }
+
+    /// Nome final do arquivo, conforme o padrão escolhido para este tipo.
+    func fileName(_ cfg: Config, capture: Capture, number: Int, source: URL, date: Date) -> String {
+        let pattern = cfg.filePattern(self)
+        let original = source.deletingPathExtension().lastPathComponent
+        // Com {ORIGINAL} a extensão fica como veio; nos outros, em maiúsculas (padrão dos atalhos).
+        let ext = pattern.contains("{ORIGINAL}") ? source.pathExtension : source.pathExtension.uppercased()
+        var stem = Pattern.render(pattern, folder: capture.name, title: capture.title,
+                                  date: capture.date ?? date, original: original, number: number)
+        if stem.isEmpty { stem = original }
+        return "\(stem).\(ext)"
     }
-    /// Vídeos e fotos: "NOME - 001.MP4" (padrão dos atalhos).
-    /// Lapela: "NOME.1.WAV" (padrão usado na organização das lapelas em 10/10/2026).
-    func fileName(capture: String, number: Int, ext: String) -> String {
-        switch self {
-        case .lapela: "\(capture).\(number).\(ext)"
-        default: "\(capture) - \(String(format: "%03d", number)).\(ext)"
+
+    /// Lê o número dos arquivos que já estão no destino, para continuar a numeração.
+    func numberMatcher(_ cfg: Config, capture: Capture) -> Pattern.Matcher? {
+        var fixed = ["PASTA": capture.name, "NOME": capture.title]
+        if let d = capture.date {
+            for t in ["AAAA", "AA", "MM", "DD"] { fixed[t] = Pattern.render("{\(t)}", date: d) }
         }
-    }
-    /// Lê o número de um arquivo já existente no destino, se seguir o padrão.
-    func number(in fileName: String, capture: String) -> Int? {
-        let stem = (fileName as NSString).deletingPathExtension
-        let prefix = self == .lapela ? "\(capture)." : "\(capture) - "
-        guard stem.hasPrefix(prefix) else { return nil }
-        return Int(stem.dropFirst(prefix.count))
+        return Pattern.Matcher(cfg.filePattern(self), fixed: fixed)
     }
 
     static func of(_ url: URL) -> Kind? {
@@ -89,10 +241,14 @@ struct Capture: Identifiable, Hashable, Sendable {
     let title: String
     var id: String { name }
 
-    init(name: String) {
+    init(name: String, matcher: Pattern.Matcher? = nil) {
         self.name = name
-        // "20261020 - CC BEB Atividade Extra" (aceita também "20260925- ...")
-        if let m = name.firstMatch(of: /^(\d{8})\s*-?\s*(.*)$/) {
+        if let g = matcher?.match(name), let d = Pattern.date(from: g) {
+            date = d
+            let t = (g["NOME"] ?? "").trimmingCharacters(in: .whitespaces)
+            title = t.isEmpty ? name : t
+        } else if let m = name.firstMatch(of: /^(\d{8})\s*-?\s*(.*)$/) {
+            // Pastas antigas: "20261020 - CC BEB Atividade Extra" (aceita também "20260925- ...")
             let f = DateFormatter()
             f.dateFormat = "yyyyMMdd"
             f.locale = Locale(identifier: "en_US_POSIX")
@@ -116,24 +272,23 @@ struct Capture: Identifiable, Hashable, Sendable {
         }
     }
 
-    static func list(in inbox: URL) -> [Capture] {
+    static func list(_ cfg: Config) -> [Capture] {
         let items = (try? FileManager.default.contentsOfDirectory(
-            at: inbox, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+            at: cfg.inboxURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
         let dirs = items.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-        return sorted(dirs.map { Capture(name: $0.lastPathComponent) })
+        let matcher = Pattern.Matcher(cfg.folderPattern)
+        return sorted(dirs.map { Capture(name: $0.lastPathComponent, matcher: matcher) })
     }
 
-    static func folderName(date: Date, title: String) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return "\(f.string(from: date)) - \(title.trimmingCharacters(in: .whitespacesAndNewlines))"
+    static func folderName(_ cfg: Config, date: Date, title: String) -> String {
+        Pattern.render(cfg.folderPattern, title: title.trimmingCharacters(in: .whitespacesAndNewlines), date: date)
     }
 
-    /// Cria a pasta da captação com as subpastas padrão. Não mexe em nada que já exista.
-    static func create(named name: String, in inbox: URL) throws -> URL {
-        let root = inbox.appendingPathComponent(name)
-        for sub in Paths.captureSubfolders {
+    /// Cria a pasta da captação com as subpastas escolhidas. Não mexe em nada que já exista.
+    static func create(named name: String, _ cfg: Config) throws -> URL {
+        let root = cfg.inboxURL.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for sub in cfg.captureFolders {
             try FileManager.default.createDirectory(
                 at: root.appendingPathComponent(sub), withIntermediateDirectories: true)
         }
@@ -177,7 +332,7 @@ enum CardScanner {
 
 struct CopyJob: Sendable {
     let source: SourceFile
-    let targets: [URL]      // Mídias (e, se marcado, o backup no Projetos)
+    let targets: [URL]      // destino principal (e, se marcado, a redundância)
     var name: String { targets[0].lastPathComponent }
 }
 
@@ -196,30 +351,46 @@ struct ImportPlan: Sendable {
     var alreadyHere: [Duplicate] { duplicates.filter { $0.capture == capture } }
     var elsewhere: [Duplicate] { duplicates.filter { $0.capture != capture } }
 
-    static func make(files: [SourceFile], kinds: Set<Kind>, capture: String,
-                     inbox: URL, backup: URL?) -> ImportPlan {
-        var plan = ImportPlan(capture: capture)
-        let index = InboxIndex(inbox: inbox, kinds: kinds, preferring: capture)
+    static func make(files: [SourceFile], kinds: Set<Kind>, capture: Capture,
+                     cfg: Config, backup: Bool) -> ImportPlan {
+        var plan = ImportPlan(capture: capture.name)
+        let index = InboxIndex(cfg, kinds: kinds, preferring: capture.name)
+        let root = cfg.inboxURL.appendingPathComponent(capture.name)
+        let backupRoot = backup ? cfg.backupURL?.appendingPathComponent(capture.name) : nil
         for kind in Kind.allCases where kinds.contains(kind) {
-            let dest = inbox.appendingPathComponent(capture).appendingPathComponent(kind.subpath)
-            let backupDest = backup?.appendingPathComponent(capture).appendingPathComponent(kind.subpath)
+            let dest = root.appendingPathComponent(cfg.subpath(kind))
+            let backupDest = backupRoot?.appendingPathComponent(cfg.subpath(kind))
             let existing = names(in: dest)
             var used = Set(existing).union(names(in: backupDest))
-            var number = (existing.compactMap { kind.number(in: $0, capture: capture) }.max() ?? 0) + 1
+            let matcher = kind.numberMatcher(cfg, capture: capture)
+            let numbered = Pattern.hasNumber(cfg.filePattern(kind))
+            var number = (existing.compactMap { name -> Int? in
+                let stem = (name as NSString).deletingPathExtension
+                return matcher?.match(stem)?["N"].flatMap(Int.init)
+            }.max() ?? 0) + 1
 
             for file in files where file.kind == kind {
                 if let dup = index.match(file) {
                     plan.duplicates.append(dup)
                     continue
                 }
-                let ext = file.url.pathExtension.uppercased()
-                var name = kind.fileName(capture: capture, number: number, ext: ext)
-                while used.contains(name) {
+                var name = kind.fileName(cfg, capture: capture, number: number, source: file.url, date: file.date)
+                if numbered {
+                    while used.contains(name) {
+                        number += 1
+                        name = kind.fileName(cfg, capture: capture, number: number, source: file.url, date: file.date)
+                    }
                     number += 1
-                    name = kind.fileName(capture: capture, number: number, ext: ext)
+                } else {
+                    // Padrão sem número (ex.: nome original): nomes repetidos ganham " (2)", " (3)"…
+                    let base = name as NSString
+                    var k = 2
+                    while used.contains(name) {
+                        name = "\(base.deletingPathExtension) (\(k)).\(base.pathExtension)"
+                        k += 1
+                    }
                 }
                 used.insert(name)
-                number += 1
                 var targets = [dest.appendingPathComponent(name)]
                 if let backupDest { targets.append(backupDest.appendingPathComponent(name)) }
                 plan.jobs.append(CopyJob(source: file, targets: targets))
@@ -241,13 +412,14 @@ struct InboxIndex {
     struct Entry { let url: URL; let capture: String }
     private var bySize: [Int64: [Entry]] = [:]
 
-    init(inbox: URL, kinds: Set<Kind>, preferring capture: String) {
+    init(_ cfg: Config, kinds: Set<Kind>, preferring capture: String) {
         let fm = FileManager.default
+        let inbox = cfg.inboxURL
         let captures = (try? fm.contentsOfDirectory(atPath: inbox.path).filter { !$0.hasPrefix(".") }) ?? []
         // A captação escolhida vem primeiro, para o aviso apontar para ela quando o arquivo estiver nas duas.
         for c in captures.sorted(by: { a, _ in a == capture }) {
             for kind in kinds {
-                let dir = inbox.appendingPathComponent(c).appendingPathComponent(kind.subpath)
+                let dir = inbox.appendingPathComponent(c).appendingPathComponent(cfg.subpath(kind))
                 let items = (try? fm.contentsOfDirectory(
                     at: dir, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles])) ?? []
                 for url in items where kind.extensions.contains(url.pathExtension.lowercased()) {

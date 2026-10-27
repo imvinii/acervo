@@ -16,6 +16,11 @@ struct ImportarCartaoApp: App {
         }
         .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1060, height: 700)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Ajustes…") { model.showSetup = true }.keyboardShortcut(",")
+            }
+        }
     }
 }
 
@@ -30,6 +35,12 @@ struct Card: Identifiable, Hashable {
 
 @MainActor
 final class Model: ObservableObject {
+    /// Discos, pastas e padrões de nome. Sem configuração salva, abre os Ajustes na primeira abertura.
+    @Published var config: Config {
+        didSet { if oldValue != config { config.save(); reloadCaptures(); reloadCards(); refreshPlan() } }
+    }
+    @Published var showSetup = false
+
     @Published var captures: [Capture] = []
     @Published var inboxAvailable = false
     @Published var selectedCapture: Capture? { didSet { if oldValue != selectedCapture { refreshPlan() } } }
@@ -40,8 +51,8 @@ final class Model: ObservableObject {
     @Published var files: [SourceFile] = [] { didSet { refreshPlan() } }
     @Published var scanning = false
 
-    @Published var kinds: Set<Kind> = Set(Kind.allCases) { didSet { if oldValue != kinds { refreshPlan() } } }
-    @Published var alsoBackup = UserDefaults.standard.bool(forKey: "fazerBackup") {
+    @Published var kinds: Set<Kind> = Set(Kind.allCases.filter(\.onByDefault)) { didSet { if oldValue != kinds { refreshPlan() } } }
+    @Published var alsoBackup = UserDefaults.standard.object(forKey: "fazerBackup") as? Bool ?? true {
         didSet { UserDefaults.standard.set(alsoBackup, forKey: "fazerBackup"); refreshPlan() }
     }
 
@@ -62,6 +73,9 @@ final class Model: ObservableObject {
     private var speedSample: (Date, Int64)?
 
     init() {
+        let saved = Config.load()
+        config = saved ?? Config.suggested
+        showSetup = saved == nil
         reloadCaptures()
         reloadCards()
         let nc = NSWorkspace.shared.notificationCenter
@@ -81,20 +95,36 @@ final class Model: ObservableObject {
 
     func reloadCaptures() {
         var isDir: ObjCBool = false
-        inboxAvailable = FileManager.default.fileExists(atPath: Paths.inbox.path, isDirectory: &isDir) && isDir.boolValue
-        captures = inboxAvailable ? Capture.list(in: Paths.inbox) : []
+        inboxAvailable = !config.inbox.isEmpty && FileManager.default.fileExists(atPath: config.inbox, isDirectory: &isDir) && isDir.boolValue
+        captures = inboxAvailable ? Capture.list(config) : []
         if let s = selectedCapture, !captures.contains(s) { selectedCapture = nil }
     }
 
-    var backupAvailable: Bool { FileManager.default.fileExists(atPath: Paths.backup.path) }
+    var backupAvailable: Bool { config.backupURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
 
-    // Cartões: volumes removíveis/ejetáveis, menos os SSDs de trabalho.
+    /// Nome do disco onde está uma pasta ("Mídias", "Projetos"…).
+    static func diskName(_ url: URL) -> String {
+        let c = url.pathComponents
+        if c.count > 2, c[1] == "Volumes" { return c[2] }
+        return (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? "disco interno"
+    }
+    var inboxDisk: String { Self.diskName(config.inboxURL) }
+    var backupDisk: String { config.backupURL.map(Self.diskName) ?? "" }
+
+    /// Pastas que os cartões das câmeras costumam ter.
+    static let cameraFolders = ["DCIM", "PRIVATE", "CLIP", "M4ROOT", "XDROOT", "AVCHD", "Blackmagic RAW"]
+    static func looksLikeCard(_ url: URL) -> Bool {
+        cameraFolders.contains { FileManager.default.fileExists(atPath: url.appendingPathComponent($0).path) }
+    }
+
+    // Cartões: volumes removíveis/ejetáveis, menos os discos de destino e os ocultos.
     func reloadCards() {
         let keys: [URLResourceKey] = [.volumeNameKey, .volumeIsRemovableKey, .volumeIsEjectableKey, .volumeIsInternalKey]
         let vols = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
         func norm(_ s: String) -> String { s.precomposedStringWithCanonicalMapping }
-        let workDisks = Set([Paths.inbox, Paths.backup].map { norm($0.pathComponents.prefix(3).joined(separator: "/")) })
-        let workNames: Set<String> = ["Mídias", "Projetos", "Elements"]
+        let workDisks = Set(([config.inboxURL] + [config.backupURL].compactMap { $0 })
+            .filter { $0.path != "/" }.map { norm($0.pathComponents.prefix(3).joined(separator: "/")) })
+        let workNames = Set(config.ignoredVolumes.map(norm))
         var found: [Card] = []
         for v in vols {
             guard let r = try? v.resourceValues(forKeys: Set(keys)), v.path.hasPrefix("/Volumes/") else { continue }
@@ -108,7 +138,7 @@ final class Model: ObservableObject {
         found += cards.filter { $0.isFolder }
         cards = found
         if let s = selectedCard, !cards.contains(s) { selectedCard = nil; files = [] }
-        if selectedCard == nil, let first = cards.first(where: { ["Untitled", "EOS_DIGITAL"].contains($0.name) }) ?? cards.first {
+        if selectedCard == nil, let first = cards.first(where: { !$0.isFolder && Self.looksLikeCard($0.url) }) ?? cards.first {
             select(card: first)
         }
     }
@@ -134,7 +164,7 @@ final class Model: ObservableObject {
             let found = CardScanner.scan(url)
             await MainActor.run {
                 guard self.selectedCard?.url == url else { return }
-                self.kinds = Set(Kind.allCases.filter { k in found.contains { $0.kind == k } })
+                self.kinds = Set(Kind.allCases.filter { k in k.onByDefault && found.contains { $0.kind == k } })
                 self.files = found
                 self.scanning = false
             }
@@ -149,10 +179,10 @@ final class Model: ObservableObject {
         let gen = planGeneration
         guard let c = selectedCapture, !files.isEmpty else { plan = nil; planning = false; return }
         planning = true
-        let (files, kinds, name) = (files, kinds, c.name)
-        let backup = alsoBackup && backupAvailable ? Paths.backup : nil
+        let (files, kinds, cfg) = (files, kinds, config)
+        let backup = alsoBackup && backupAvailable
         Task.detached(priority: .userInitiated) {
-            let p = ImportPlan.make(files: files, kinds: kinds, capture: name, inbox: Paths.inbox, backup: backup)
+            let p = ImportPlan.make(files: files, kinds: kinds, capture: c, cfg: cfg, backup: backup)
             await MainActor.run {
                 guard gen == self.planGeneration else { return }
                 self.plan = p
@@ -167,14 +197,16 @@ final class Model: ObservableObject {
 
     var spaceProblem: String? {
         guard let plan, plan.bytes > 0 else { return nil }
-        if freeSpace(at: Paths.inbox) < plan.bytes { return "Não há espaço suficiente no SSD Mídias." }
-        if alsoBackup && backupAvailable && freeSpace(at: Paths.backup) < plan.bytes { return "Não há espaço suficiente no SSD Projetos." }
+        if freeSpace(at: config.inboxURL) < plan.bytes { return "Não há espaço suficiente no disco \(inboxDisk)." }
+        if alsoBackup && backupAvailable, let b = config.backupURL, freeSpace(at: b) < plan.bytes {
+            return "Não há espaço suficiente no disco de redundância (\(backupDisk))."
+        }
         return nil
     }
 
     func createCapture(date: Date, title: String) throws {
-        let name = Capture.folderName(date: date, title: title)
-        _ = try Capture.create(named: name, in: Paths.inbox)
+        let name = Capture.folderName(config, date: date, title: title)
+        _ = try Capture.create(named: name, config)
         reloadCaptures()
         selectedCapture = captures.first { $0.name == name }
         search = ""
@@ -284,7 +316,12 @@ final class Model: ObservableObject {
 
     func revealCapture() {
         guard let c = selectedCapture else { return }
-        NSWorkspace.shared.open(Paths.inbox.appendingPathComponent(c.name))
+        NSWorkspace.shared.open(config.inboxURL.appendingPathComponent(c.name))
+    }
+
+    func hide(card: Card) {
+        guard !card.isFolder, !config.ignoredVolumes.contains(card.name) else { return }
+        config.ignoredVolumes.append(card.name)
     }
 }
 
@@ -334,6 +371,16 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: isBusy)
         .background(.background)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { model.showSetup = true } label: { Label("Ajustes", systemImage: "gearshape") }
+                    .help("Discos, pastas e padrões de nome")
+                    .disabled(isBusy)
+            }
+        }
+        .sheet(isPresented: $model.showSetup) {
+            SetupView(config: model.config, firstRun: Config.load() == nil)
+        }
     }
 
     var isBusy: Bool { if case .idle = model.phase { false } else { true } }
@@ -378,6 +425,11 @@ struct CardColumn: View {
                     ForEach(model.cards) { card in
                         CardRow(card: card, selected: model.selectedCard == card)
                             .onTapGesture { model.select(card: card) }
+                            .contextMenu {
+                                if !card.isFolder {
+                                    Button("Não mostrar este disco") { model.hide(card: card) }
+                                }
+                            }
                     }
                 }
                 .padding(.horizontal, 14)
@@ -430,19 +482,24 @@ struct CardSummary: View {
             Text("NO CARTÃO").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
             if model.scanning {
                 HStack { ProgressView().controlSize(.small); Text("Lendo o cartão…").foregroundStyle(.secondary) }
-            } else if model.files.isEmpty {
-                Text("Nenhum vídeo, foto RAW ou áudio encontrado.").foregroundStyle(.secondary).font(.callout)
             } else {
+                // Todos os tipos aparecem, para ficar claro o que o app consegue importar.
                 ForEach(Kind.allCases) { k in
-                    if model.count(k) > 0 {
-                        HStack {
-                            Image(systemName: k.symbol).frame(width: 20).foregroundStyle(.secondary)
-                            Text(k.label(model.count(k)))
-                            Spacer()
-                            Text(Fmt.bytes(model.bytes(k))).foregroundStyle(.secondary).monospacedDigit()
+                    let n = model.count(k)
+                    HStack(alignment: .firstTextBaseline) {
+                        Image(systemName: k.symbol).frame(width: 20).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(k.title)
+                            Text(n > 0 ? k.label(n) : "nenhum").font(.caption).foregroundStyle(.secondary)
                         }
-                        .font(.callout)
+                        Spacer()
+                        if n > 0 { Text(Fmt.bytes(model.bytes(k))).foregroundStyle(.secondary).monospacedDigit() }
                     }
+                    .font(.callout)
+                    .opacity(n > 0 ? 1 : 0.45)
+                }
+                if model.files.isEmpty {
+                    Text("Nada para importar neste cartão.").foregroundStyle(.secondary).font(.caption)
                 }
                 if let first = model.files.map(\.date).min(), let last = model.files.map(\.date).max() {
                     Text(Fmt.day.string(from: first) == Fmt.day.string(from: last)
@@ -480,8 +537,13 @@ struct CaptureColumn: View {
             if !model.inboxAvailable {
                 VStack(spacing: 10) {
                     Image(systemName: "externaldrive.badge.exclamationmark").font(.system(size: 34)).foregroundStyle(.tertiary)
-                    Text("Conecte o SSD Mídias").font(.headline)
-                    Text(Paths.inbox.path).font(.caption).foregroundStyle(.secondary)
+                    if model.config.inbox.isEmpty {
+                        Text("Escolha onde guardar as captações").font(.headline)
+                        Button("Abrir Ajustes…") { model.showSetup = true }
+                    } else {
+                        Text("Conecte o disco \(model.inboxDisk)").font(.headline)
+                        Text(model.config.inbox).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -551,14 +613,15 @@ struct NewCaptureSheet: View {
     @FocusState private var nameFocused: Bool
 
     var trimmed: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
-    var invalid: Bool { trimmed.isEmpty || trimmed.contains("/") || trimmed.contains(":") }
-    var exists: Bool { model.captures.contains { $0.name == Capture.folderName(date: date, title: trimmed) } }
+    var invalid: Bool { trimmed.isEmpty || trimmed.contains("/") || trimmed.contains(":") || folderName.isEmpty }
+    var folderName: String { Capture.folderName(model.config, date: date, title: trimmed) }
+    var exists: Bool { model.captures.contains { $0.name == folderName } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Nova captação").font(.title2.bold())
             Form {
-                TextField("Nome", text: $title, prompt: Text("ex.: CC BEB ELETRICA"))
+                TextField("Nome", text: $title, prompt: Text("ex.: CASAMENTO ANA E JOÃO"))
                     .focused($nameFocused)
                     .onSubmit(create)
                 DatePicker("Data da gravação", selection: $date, displayedComponents: .date)
@@ -569,9 +632,9 @@ struct NewCaptureSheet: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("VAI CRIAR").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                Label(Capture.folderName(date: date, title: trimmed.isEmpty ? "…" : trimmed), systemImage: "folder.fill")
+                Label(Capture.folderName(model.config, date: date, title: trimmed.isEmpty ? "…" : trimmed), systemImage: "folder.fill")
                     .font(.system(size: 14, weight: .semibold))
-                Text("com Vídeos, Fotos/Brutas, Fotos/Seleção e Lapela")
+                Text("com " + ListFormatter.localizedString(byJoining: model.config.captureFolders))
                     .font(.caption).foregroundStyle(.secondary)
             }
             if exists { Text("Essa pasta já existe; ela só vai ser selecionada.").font(.caption).foregroundStyle(.orange) }
@@ -628,17 +691,22 @@ struct ImportColumn: View {
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Toggle(isOn: $model.alsoBackup) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Também copiar para o SSD Projetos")
-                            Text("Inbox (BACKUP), mesma pasta e mesmos nomes")
-                                .font(.caption).foregroundStyle(.secondary)
+                    if let b = model.config.backupURL {
+                        Toggle(isOn: $model.alsoBackup) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Também copiar para a redundância")
+                                Text("\(model.backupDisk) · \(b.lastPathComponent), mesma pasta e mesmos nomes")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
-                    }
-                    .toggleStyle(.checkbox)
-                    .disabled(!model.backupAvailable)
-                    if model.alsoBackup && !model.backupAvailable {
-                        Text("SSD Projetos não conectado: a cópia extra fica de fora.").font(.caption).foregroundStyle(.orange)
+                        .toggleStyle(.checkbox)
+                        .disabled(!model.backupAvailable)
+                        if model.alsoBackup && !model.backupAvailable {
+                            Text("Disco \(model.backupDisk) não conectado: a cópia de redundância fica de fora.").font(.caption).foregroundStyle(.orange)
+                        }
+                    } else {
+                        Button("Configurar um disco de redundância…") { model.showSetup = true }
+                            .buttonStyle(.link).font(.callout)
                     }
                 }
 
@@ -732,8 +800,8 @@ struct PlanPreview: View {
                         let jobs = plan.jobs.filter { $0.source.kind == k }
                         if let first = jobs.first {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(k.subpath).font(.caption.weight(.semibold))
-                                Text(jobs.count == 1 ? first.name : "\(first.name)  …  \(jobs.last!.name.split(separator: " - ").last.map(String.init) ?? jobs.last!.name)")
+                                Text("\(model.config.subpath(k)) · \(k.label(jobs.count))").font(.caption.weight(.semibold))
+                                Text(jobs.count == 1 ? first.name : "\(first.name)  …  \(jobs.last!.name)")
                                     .font(.caption.monospaced()).foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }
@@ -888,7 +956,7 @@ struct DoneOverlay: View {
                         Image(systemName: "sdcard").font(.system(size: 22)).foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Limpar o cartão").font(.callout.weight(.semibold))
-                            Text("Apaga do cartão \(Fmt.files(items.count)) (\(Fmt.bytes(bytes))) que já estão no SSD. Antes, cada um é relido inteiro e comparado de novo com a cópia; o que não bater fica no cartão.")
+                            Text("Apaga do cartão \(Fmt.files(items.count)) (\(Fmt.bytes(bytes))) que já estão no destino. Antes, cada um é relido inteiro e comparado de novo com a cópia; o que não bater fica no cartão.")
                                 .font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
